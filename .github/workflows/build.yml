@@ -59,12 +59,20 @@ jobs:
       - name: Build
         run: cargo build --release --target ${{ matrix.target }}
 
+      - name: Package artifact
+        shell: bash
+        run: |
+          BIN=target/${{ matrix.target }}/release/p2p_server
+          OUT=p2p_server-${{ matrix.target }}-linux
+          cp "$BIN" "$OUT"
+          tar -czf "$OUT.tar.gz" "$OUT"
+
       - name: Upload binary artifact
         uses: actions/upload-artifact@v4
         with:
           name: p2p_server-${{ matrix.target }}-linux
           path: |
-            target/${{ matrix.target }}/release/p2p_server*
+            p2p_server-${{ matrix.target }}-linux.tar.gz
 
   macos:
     runs-on: macos-latest
@@ -90,11 +98,19 @@ jobs:
       - name: Build
         run: cargo build --release --target ${{ matrix.target }}
 
+      - name: Package artifact
+        shell: bash
+        run: |
+          BIN=target/${{ matrix.target }}/release/p2p_server
+          OUT=p2p_server-${{ matrix.target }}-macos
+          cp "$BIN" "$OUT"
+          tar -czf "$OUT.tar.gz" "$OUT"
+
       - name: Upload binary artifact
         uses: actions/upload-artifact@v4
         with:
           name: p2p_server-${{ matrix.target }}-macos
-          path: target/${{ matrix.target }}/release/p2p_server*
+          path: p2p_server-${{ matrix.target }}-macos.tar.gz
 
   windows:
     runs-on: windows-latest
@@ -121,11 +137,19 @@ jobs:
       - name: Build
         run: cargo build --release --target ${{ matrix.target }}
 
+      - name: Package artifact
+        shell: pwsh
+        run: |
+          $bin = "target/${{ matrix.target }}/release/p2p_server.exe"
+          $out = "p2p_server-${{ matrix.target }}-windows.exe"
+          Copy-Item $bin $out
+          Compress-Archive -Path $out -DestinationPath "p2p_server-${{ matrix.target }}-windows.zip"
+
       - name: Upload binary artifact
         uses: actions/upload-artifact@v4
         with:
           name: p2p_server-${{ matrix.target }}-windows
-          path: target/${{ matrix.target }}/release/p2p_server.exe
+          path: p2p_server-${{ matrix.target }}-windows.zip
 
   release:
     runs-on: ubuntu-latest
@@ -145,7 +169,8 @@ jobs:
       - name: Generate checksums
         run: |
           cd dist
-          sha256sum * > SHA256SUMS.txt
+          shopt -s nullglob
+          sha256sum *.tar.gz *.zip > SHA256SUMS.txt
 
       - name: Create GitHub Release (draft)
         uses: softprops/action-gh-release@v1
