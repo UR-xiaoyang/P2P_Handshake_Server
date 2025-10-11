@@ -1,0 +1,8 @@
+{
+  "listen_address": "127.0.0.1:8080",
+  "max_connections": 100,
+  "heartbeat_interval": 30,
+  "connection_timeout": 60,
+  "discovery_port_range": [8081, 8090],
+  "enable_discovery": true
+}
