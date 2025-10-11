@@ -248,6 +248,228 @@ println!("连接的节点数: {}", stats.peer_stats.total_peers);
 - 消息大小限制（默认1MB）
 - 连接数限制
 - 超时机制
+
+## 实操教程（一步上手）
+
+以下以本机回环地址为例，带你从零启动并完成一次完整的握手与消息交互。
+
+### 步骤 1：克隆并构建
+
+```bash
+git clone <repository-url>
+cd P2P_Handshake_Server
+cargo build --release
+```
+
+### 步骤 2：启动服务器
+
+- 使用默认配置（监听 `127.0.0.1:8080`，最大连接数 100）：
+
+```bash
+cargo run --bin p2p_server
+```
+
+- 指定监听地址与连接数（未提供 `--config` 时生效）：
+
+```bash
+cargo run --bin p2p_server -- --address 127.0.0.1:8080 --max-connections 200
+```
+
+- 从配置文件启动（当传入 `--config` 时，配置文件优先于命令行地址与连接数）：
+
+```bash
+cargo run --bin p2p_server -- --config config.json
+```
+
+建议设置日志级别以便观察协议交互：
+
+```bash
+# Windows PowerShell
+$env:RUST_LOG="info"; cargo run --bin p2p_server
+
+# Linux/macOS
+RUST_LOG=info cargo run --bin p2p_server
+```
+
+### 步骤 3：运行客户端示例
+
+```bash
+cargo run --example simple_client
+```
+
+客户端会依次发送握手、数据与 Ping，并打印收到的响应（如 `HandshakeResponse` 与 `Pong`）。
+
+### 步骤 4：观察交互
+
+- 服务器日志会显示握手、ACK、数据回显以及心跳统计等信息。
+- 客户端会打印从服务器接收的各类响应与可能发生的超时提示。
+
+## 配置优先级与覆盖规则
+
+- 传入 `--config <file>` 时：程序从文件加载所有字段（`listen_address`、`max_connections`、`heartbeat_interval` 等），这些值在运行期生效。
+- 未传入 `--config` 时：使用命令行的 `--address` 与 `--max-connections` 构建默认配置，其余字段使用代码默认值（心跳 30s、连接超时 60s、发现端口范围 `8081-8090`、启用发现）。
+
+示例配置（`config.json`）：
+
+```json
+{
+  "listen_address": "127.0.0.1:8080",
+  "max_connections": 100,
+  "heartbeat_interval": 30,
+  "connection_timeout": 60,
+  "discovery_port_range": [8081, 8090],
+  "enable_discovery": true
+}
+```
+
+## 协议交互示例（JSON）
+
+握手请求（带 ACK）：
+
+```json
+{
+  "id": "b5e2e2b2-...",
+  "message_type": "HandshakeRequest",
+  "timestamp": 1710000000,
+  "payload": {
+    "node_id": "client-uuid",
+    "listen_addr": "127.0.0.1:9000",
+    "capabilities": ["test"],
+    "metadata": {"client_type": "udp_test_client"}
+  },
+  "sequence_number": 1,
+  "requires_ack": true,
+  "ack_for": null
+}
+```
+
+对应 ACK：
+
+```json
+{
+  "id": "c1f4a8f3-...",
+  "message_type": "Ack",
+  "timestamp": 1710000001,
+  "payload": null,
+  "sequence_number": 0,
+  "requires_ack": false,
+  "ack_for": 1
+}
+```
+
+数据消息与回显响应：客户端发送 `Data`，服务器回 `{"echo": ..., "timestamp": ...}`。
+
+## 日志与调试
+
+- 环境变量 `RUST_LOG` 支持 `error | warn | info | debug | trace`。
+- 生产运行建议使用 `info`，调试时使用 `debug` 或 `trace`（可能较为冗长）。
+- 定期统计输出：服务器每 5 分钟打印对等节点统计（已认证、连接中等）。
+
+## 常见问题与排查
+
+- 端口占用：修改 `--address` 端口或更新 `config.json`；在 Windows 上可用 `netstat -ano | findstr :8080` 查找占用进程。
+- 防火墙拦截：确保操作系统防火墙允许 UDP 入站到监听端口；企业网络可能对广播/发现端口有限制。
+- 收不到 ACK：检查网络丢包与 `requires_ack` 设置，必要时调整心跳与超时参数。
+- 超时过多：在高丢包网络下，适当加大 `connection_timeout` 与重试策略；关注日志中的 Error 与 Warn。
+
+## 使用 GitHub Actions 构建产物（下载与运行）
+
+本仓库的 CI 会为多个平台产出可执行包。你可以在 GitHub 的 Actions 任务详情中下载构建产物（Artifacts），或在打标签（`v*`）后在 Releases 草稿中下载（路径为 `dist/**`）。
+
+### 产物命名与内容
+- Windows：`p2p_server-<target>-windows.zip`，解压后得到 `p2p_server-<target>-windows.exe`
+- Linux：`p2p_server-<target>-linux.tar.gz`，解压后得到 `p2p_server-<target>-linux`
+- macOS：`p2p_server-<target>-macos.tar.gz`，解压后得到 `p2p_server-<target>-macos`
+
+示例目标标识：`x86_64-pc-windows-msvc`、`x86_64-unknown-linux-gnu`、`x86_64-apple-darwin`。
+
+### Windows 运行
+
+```powershell
+# 解压
+Expand-Archive -Path p2p_server-x86_64-pc-windows-msvc-windows.zip -DestinationPath .
+
+# 运行（优先从配置文件读取）
+./p2p_server-x86_64-pc-windows-msvc-windows.exe --config config.json
+
+# 或使用命令行参数（未提供 --config 时生效）
+./p2p_server-x86_64-pc-windows-msvc-windows.exe --address 127.0.0.1:8080 --max-connections 200
+
+# 设置日志级别
+$env:RUST_LOG="info"; ./p2p_server-x86_64-pc-windows-msvc-windows.exe
+```
+
+可选：将可执行文件重命名为 `p2p_server.exe` 以便调用。
+
+### Linux 运行
+
+```bash
+# 解压
+tar -xzf p2p_server-x86_64-unknown-linux-gnu-linux.tar.gz
+
+# 赋权（如需）
+chmod +x p2p_server-x86_64-unknown-linux-gnu-linux
+
+# 运行
+./p2p_server-x86_64-unknown-linux-gnu-linux --config config.json
+
+# 日志级别
+RUST_LOG=info ./p2p_server-x86_64-unknown-linux-gnu-linux
+```
+
+### macOS 运行
+
+```bash
+# 解压
+tar -xzf p2p_server-x86_64-apple-darwin-macos.tar.gz
+
+# 赋权（如需）
+chmod +x p2p_server-x86_64-apple-darwin-macos
+
+# 运行
+./p2p_server-x86_64-apple-darwin-macos --config config.json
+
+# 日志级别
+RUST_LOG=info ./p2p_server-x86_64-apple-darwin-macos
+```
+
+### 参数与配置优先级
+- `--config <file>`：从文件加载所有配置（优先级最高）。
+- 未提供 `--config` 时，命令行的 `--address` 与 `--max-connections` 生效，其余字段使用默认值（心跳 30s、超时 60s、发现端口范围 `8081-8090`、启用发现）。
+
+### 校验与发布
+- Release 任务会在 `dist/SHA256SUMS.txt` 中生成校验文件。
+- Linux/macOS 校验：`sha256sum <artifact>`；Windows 校验：`certutil -hashfile <artifact> SHA256`。
+- 构建发布为草稿（`draft: true`），可在 GitHub 上确认后正式发布。
+
+### 注意事项
+- 构建产物仅包含服务器二进制；示例客户端不打包。如需联调，请在源码仓库运行：`cargo run --example simple_client`。
+- Windows 可能需要在防火墙中放行入站 UDP；Linux/macOS 需确认端口未被占用。
+
+## 生产部署建议
+
+- 使用 `cargo build --release` 构建并运行，以获得更佳性能。
+- 将配置与日志级别分离至环境与文件，避免硬编码。
+- 监控与滚动重启：结合系统服务或进程管理器（如 systemd、NSSM）进行守护与重启。
+
+## 深入文档
+
+- 中文文档：
+  - `README/overview.md`（总体架构）
+  - `README/protocol.md`（协议说明）
+  - `README/discovery.md`（节点发现）
+  - `README/routing.md`（消息路由）
+  - `README/server.md`（服务器实现）
+  - `README/client.md`（客户端示例）
+
+- English Docs:
+  - `README-EN/overview.md`
+  - `README-EN/protocol.md`
+  - `README-EN/discovery.md`
+  - `README-EN/routing.md`
+  - `README-EN/server.md`
+  - `README-EN/client.md`
+
 - 错误恢复
 - 资源清理
 
