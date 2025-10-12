@@ -4,6 +4,7 @@ use std::net::SocketAddr;
 use anyhow::Result;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct Config {
     /// 服务器监听地址
     pub listen_address: SocketAddr,
@@ -22,6 +23,9 @@ pub struct Config {
     
     /// 是否启用节点发现
     pub enable_discovery: bool,
+
+    /// 网络ID（用于网络隔离与校验）
+    pub network_id: String,
 }
 
 impl Config {
@@ -33,6 +37,7 @@ impl Config {
             connection_timeout: 60,
             discovery_port_range: (8081, 8090),
             enable_discovery: true,
+            network_id: "p2p_default".to_string(),
         }
     }
     

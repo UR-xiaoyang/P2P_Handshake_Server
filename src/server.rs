@@ -33,6 +33,7 @@ impl P2PServer {
         // 添加服务器特定的元数据
         local_node_info.add_metadata("server_type".to_string(), "handshake_server".to_string());
         local_node_info.add_metadata("max_connections".to_string(), config.max_connections.to_string());
+        // 不在服务端固定network_id，由客户端在握手时提供并驱动
         
         let peer_manager = Arc::new(PeerManager::new(
             local_node_info.clone(),
@@ -133,26 +134,37 @@ impl P2PServer {
                 if let Err(e) = self.network_manager.send_to(&ack_message, sender_addr).await {
                     warn!("发送ACK失败: {}", e);
                 }
+                info!(
+                    "已发送ACK: ack_for={} 给 {} (seq={:?})",
+                    message.id,
+                    sender_addr,
+                    message.sequence_number
+                );
             }
         }
         
         match message.message_type {
             MessageType::HandshakeRequest => {
+                info!("处理握手请求消息，来自 {}", peer.read().await.addr());
                 self.peer_manager.handle_handshake_request(peer, message).await?;
             }
             MessageType::HandshakeResponse => {
+                info!("处理握手响应消息，来自 {}", peer.read().await.addr());
                 self.peer_manager.handle_handshake_response(peer, message).await?;
             }
             MessageType::Ping => {
+                info!("收到Ping，来自 {}", peer.read().await.addr());
                 self.peer_manager.handle_ping(peer, message).await?;
             }
             MessageType::Pong => {
+                info!("收到Pong，来自 {}", peer.read().await.addr());
                 self.peer_manager.handle_pong(peer, message).await?;
             }
             MessageType::DiscoveryRequest => {
                 Self::handle_discovery_request(&self.peer_manager, peer, message).await?;
             }
             MessageType::Data => {
+                info!("收到数据消息，来自 {}", peer.read().await.addr());
                 Self::handle_data_message(peer, message).await?;
             }
             MessageType::Disconnect => {
@@ -160,11 +172,11 @@ impl P2PServer {
                 peer.write().await.update_status(PeerStatus::Disconnected);
             }
             MessageType::Ack => {
-                debug!("收到ACK消息: {:?}", message.ack_for);
+                info!("收到ACK消息: ack_for={:?} 来自 {}", message.ack_for, peer.read().await.addr());
                 // 处理ACK逻辑（如果需要）
             }
             MessageType::Error => {
-                warn!("收到错误消息: {:?}", message.payload);
+                warn!("收到错误消息: {:?} 来自 {}", message.payload, peer.read().await.addr());
             }
             _ => {
                 warn!("未知消息类型: {:?}", message.message_type);

@@ -5,7 +5,7 @@ use std::net::SocketAddr;
 use std::time::Duration;
 use tokio::time::timeout;
 
-use p2p_handshake_server::protocol::{NodeInfo, Message, MessageType};
+use p2p_handshake_server::protocol::{NodeInfo, Message, MessageType, HandshakeResponse};
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -27,6 +27,8 @@ async fn main() -> Result<()> {
     let mut client_info = NodeInfo::new("test_client".to_string(), local_addr);
     client_info.add_capability("test".to_string());
     client_info.add_metadata("client_type".to_string(), "udp_test_client".to_string());
+    // 设置网络ID以便与服务器匹配
+    client_info.add_metadata("network_id".to_string(), "p2p_default".to_string());
     
     // 发送握手请求
     let handshake_request = Message::new_with_ack(
@@ -43,6 +45,17 @@ async fn main() -> Result<()> {
         match response.message_type {
             MessageType::HandshakeResponse => {
                 println!("收到握手响应: {:?}", response.payload);
+                // 解析并校验网络ID
+                if let Ok(resp) = serde_json::from_value::<HandshakeResponse>(response.payload.clone()) {
+                    let remote_net = resp.node_info.metadata.get("network_id");
+                    let local_net = client_info.metadata.get("network_id");
+                    if remote_net == local_net {
+                        println!("网络ID匹配: {:?}", remote_net);
+                    } else {
+                        println!("网络ID不匹配: 本地={:?}, 对端={:?}", local_net, remote_net);
+                        return Ok(());
+                    }
+                }
             }
             MessageType::Error => {
                 println!("握手失败: {:?}", response.payload);
