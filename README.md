@@ -473,6 +473,8 @@ RUST_LOG=info ./p2p_server-x86_64-apple-darwin-macos
 - 错误恢复
 - 资源清理
 
+- 更新日志：`CHANGELOG.md`（包含版本历史与变更说明）
+
 ## 故障排除
 
 ### 常见问题

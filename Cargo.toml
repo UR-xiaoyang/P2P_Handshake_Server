@@ -1,6 +1,6 @@
 [package]
 name = "p2p_handshake_server"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 authors = ["Your Name <your.email@example.com>"]
 description = "A P2P network server implementation in Rust"
