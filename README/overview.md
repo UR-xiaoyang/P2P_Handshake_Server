@@ -35,6 +35,10 @@
 建议在开发调试时开启详细日志：
 
 ```powershell
+# 方式一：命令行直接指定（优先级更高）
+cargo run --bin p2p_server -- --DEBUG
+
+# 方式二：环境变量（未指定 CLI 日志级别时生效）
 $env:RUST_LOG="debug"; cargo run --bin p2p_server
 ```
 

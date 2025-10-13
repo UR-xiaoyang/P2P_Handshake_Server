@@ -35,6 +35,10 @@ This project is a P2P handshake server written in Rust. It has been migrated fro
 Enable detailed logs during development:
 
 ```powershell
+# Method 1: CLI argument (takes precedence)
+cargo run --bin p2p_server -- --DEBUG
+
+# Method 2: Environment variable (effective when no CLI log level is set)
 $env:RUST_LOG="debug"; cargo run --bin p2p_server
 ```
 

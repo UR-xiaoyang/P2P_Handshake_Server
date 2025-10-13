@@ -49,6 +49,10 @@ cargo run --bin p2p_server -- --config config.json --address 127.0.0.1:8080
 Enable debug logs:
 
 ```powershell
+# Method 1: CLI argument (takes precedence)
+cargo run --bin p2p_server -- --DEBUG
+
+# Method 2: Environment variable (effective when no CLI log level is set)
 $env:RUST_LOG="debug"; cargo run --bin p2p_server
 ```
 
@@ -82,6 +86,11 @@ OPTIONS:
   -a, --address <ADDRESS>         Server listen address [default: 127.0.0.1:8080]
   -m, --max-connections <NUMBER>  Max connections [default: 100]
   -c, --config <FILE>             Config file path
+      --TRACE                     Set log level to TRACE (mutually exclusive)
+      --DEBUG                     Set log level to DEBUG (mutually exclusive)
+      --INFO                      Set log level to INFO (mutually exclusive)
+      --WARN                      Set log level to WARN (mutually exclusive)
+      --ERROR                     Set log level to ERROR (mutually exclusive)
   -h, --help                      Show help
 ```
 

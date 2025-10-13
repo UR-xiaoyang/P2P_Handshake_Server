@@ -65,12 +65,22 @@ cargo run --bin p2p_server -- --config config.json --address 127.0.0.1:8080
 cargo run --example simple_client
 ```
 
-建议设置日志级别以便观察协议交互：
+### 日志级别
+
+建议优先使用命令行参数设置日志级别（优先级更高）：
 
 ```bash
-# PowerShell
-$env:RUST_LOG="debug"; cargo run --bin p2p_server
+cargo run --bin p2p_server -- --INFO
 ```
+
+未指定 CLI 日志级别时，可通过环境变量控制：
+
+```bash
+export RUST_LOG=info
+cargo run --bin p2p_server
+```
+
+可用的日志级别：`ERROR`, `WARN`, `INFO`, `DEBUG`, `TRACE`
 
 ## 配置
 
@@ -104,8 +114,13 @@ p2p_server [OPTIONS]
 OPTIONS:
     -a, --address <ADDRESS>           服务器监听地址 [default: 127.0.0.1:8080]
     -m, --max-connections <NUMBER>    最大连接数 [default: 100]
-    -c, --config <FILE>              配置文件路径
-    -h, --help                       显示帮助信息
+    -c, --config <FILE>               配置文件路径
+        --TRACE                       设置日志级别为 TRACE（与下列日志级别互斥）
+        --DEBUG                       设置日志级别为 DEBUG（互斥）
+        --INFO                        设置日志级别为 INFO（互斥）
+        --WARN                        设置日志级别为 WARN（互斥）
+        --ERROR                       设置日志级别为 ERROR（互斥）
+    -h, --help                        显示帮助信息
 ```
 
 ## API文档
@@ -281,16 +296,6 @@ cargo run --bin p2p_server -- --address 127.0.0.1:8080 --max-connections 200
 cargo run --bin p2p_server -- --config config.json
 ```
 
-建议设置日志级别以便观察协议交互：
-
-```bash
-# Windows PowerShell
-$env:RUST_LOG="info"; cargo run --bin p2p_server
-
-# Linux/macOS
-RUST_LOG=info cargo run --bin p2p_server
-```
-
 ### 步骤 3：运行客户端示例
 
 ```bash
@@ -361,7 +366,7 @@ cargo run --example simple_client
 
 ## 日志与调试
 
-- 环境变量 `RUST_LOG` 支持 `error | warn | info | debug | trace`。
+- 建议优先通过命令行参数设置日志级别（如 `--INFO`、`--DEBUG`、`--TRACE`）；未指定时可使用环境变量 `RUST_LOG`（支持 `error | warn | info | debug | trace`）。
 - 生产运行建议使用 `info`，调试时使用 `debug` 或 `trace`（可能较为冗长）。
 - 定期统计输出：服务器每 5 分钟打印对等节点统计（已认证、连接中等）。
 
@@ -396,7 +401,12 @@ Expand-Archive -Path p2p_server-x86_64-pc-windows-msvc-windows.zip -DestinationP
 ./p2p_server-x86_64-pc-windows-msvc-windows.exe --address 127.0.0.1:8080 --max-connections 200
 
 # 设置日志级别
-$env:RUST_LOG="info"; ./p2p_server-x86_64-pc-windows-msvc-windows.exe
+
+# 优先使用 CLI 指定日志级别
+./p2p_server-x86_64-unknown-linux-gnu-linux --INFO
+
+# 若未指定 CLI 日志级别，可使用环境变量
+RUST_LOG=info ./p2p_server-x86_64-unknown-linux-gnu-linux
 ```
 
 可选：将可执行文件重命名为 `p2p_server.exe` 以便调用。
@@ -413,7 +423,9 @@ chmod +x p2p_server-x86_64-unknown-linux-gnu-linux
 # 运行
 ./p2p_server-x86_64-unknown-linux-gnu-linux --config config.json
 
-# 日志级别
+# 日志级别（优先使用 CLI 指定）
+./p2p_server-x86_64-unknown-linux-gnu-linux --INFO
+# 若未指定 CLI 日志级别，可使用环境变量
 RUST_LOG=info ./p2p_server-x86_64-unknown-linux-gnu-linux
 ```
 
@@ -429,7 +441,9 @@ chmod +x p2p_server-x86_64-apple-darwin-macos
 # 运行
 ./p2p_server-x86_64-apple-darwin-macos --config config.json
 
-# 日志级别
+# 日志级别（优先使用 CLI 指定）
+./p2p_server-x86_64-apple-darwin-macos --INFO
+# 若未指定 CLI 日志级别，可使用环境变量
 RUST_LOG=info ./p2p_server-x86_64-apple-darwin-macos
 ```
 

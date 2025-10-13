@@ -58,4 +58,5 @@ Example request:
 ## 7) Logging & Observability
 
 - At `debug` level, the system logs send/receive and handling details, useful for observing ACK/retransmit behavior.
+- Prefer setting log level via CLI args (e.g., `--INFO`, `--DEBUG`, `--TRACE`); when no CLI level is set, use `RUST_LOG`.
 - Lower log level in production to reduce overhead.

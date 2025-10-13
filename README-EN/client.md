@@ -30,7 +30,7 @@ This document describes the typical UDP client workflow and key implementation p
 
 ## Logging & Troubleshooting
 
-- Server-side `RUST_LOG=debug` helps observe interactions.
+- Prefer setting log level via CLI args on the server side to observe interactions, e.g., `cargo run --bin p2p_server -- --DEBUG`. If no CLI log level is set, you can use the environment variable `RUST_LOG=debug`.
 - Common errors:
   - `WSAECONNRESET (10054)`: In UDP contexts often means peer unreachable or port changed; retry or re-handshake.
   - `Failed to receive UDP packet`: typically after client disconnect; reduce log level or ignore.
