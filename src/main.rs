@@ -23,16 +23,32 @@ use crate::config::Config;
 ))]
 struct Args {
     /// 服务器监听地址
-    #[arg(short, long, default_value = "127.0.0.1:8080")]
-    address: std::net::SocketAddr,
+    #[arg(short, long)]
+    address: Option<std::net::SocketAddr>,
     
     /// 最大连接数
-    #[arg(short, long, default_value = "100")]
-    max_connections: usize,
+    #[arg(short, long)]
+    max_connections: Option<usize>,
     
     /// 配置文件路径
     #[arg(short, long)]
     config: Option<String>,
+
+    /// 网络ID
+    #[arg(long)]
+    network_id: Option<String>,
+
+    /// 心跳间隔（秒）
+    #[arg(long)]
+    heartbeat_interval: Option<u64>,
+
+    /// 连接超时时间（秒）
+    #[arg(long)]
+    connection_timeout: Option<u64>,
+
+    /// 是否启用节点发现
+    #[arg(long)]
+    enable_discovery: Option<bool>,
 
     /// 设置日志级别为 TRACE
     #[arg(long = "TRACE", action = ArgAction::SetTrue)]
@@ -81,17 +97,39 @@ async fn main() -> anyhow::Result<()> {
 
     info!("启动P2P握手服务器...");
     
-    // 加载配置
-    let config = if let Some(config_path) = args.config.clone() {
+    // 确定基础配置：优先从文件加载，否则使用默认值
+    let mut config = if let Some(config_path) = args.config {
         Config::from_file(&config_path)?
     } else {
-        Config::new(args.address, args.max_connections)
+        Config::default()
     };
 
+    // 使用命令行参数覆盖配置
+    if let Some(address) = args.address {
+        config.listen_address = address;
+    }
+    if let Some(max_connections) = args.max_connections {
+        config.max_connections = max_connections;
+    }
+    if let Some(network_id) = args.network_id {
+        config.network_id = network_id;
+    }
+    if let Some(heartbeat_interval) = args.heartbeat_interval {
+        config.heartbeat_interval = heartbeat_interval;
+    }
+    if let Some(connection_timeout) = args.connection_timeout {
+        config.connection_timeout = connection_timeout;
+    }
+    if let Some(enable_discovery) = args.enable_discovery {
+        config.enable_discovery = enable_discovery;
+    }
+
+    info!("最终配置: {:?}", config);
+
     // 创建并启动服务器
-    let mut server = P2PServer::new(config).await?;
+    let mut server = P2PServer::new(config.clone()).await?;
     
-    info!("服务器正在监听地址: {}", args.address);
+    info!("服务器正在监听地址: {}", config.listen_address);
     
     // 启动服务器
     if let Err(e) = server.run().await {

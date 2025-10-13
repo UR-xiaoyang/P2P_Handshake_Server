@@ -186,13 +186,20 @@ impl PeerManager {
         let node_info = HandshakeProtocol::validate_handshake_request(message)
             .map_err(|e| anyhow::anyhow!("握手请求验证失败: {}", e))?;
         
-        // 打印更详细的握手请求信息
-        let incoming_network_id_dbg = node_info.metadata.get("network_id").cloned();
         let peer_addr = peer.read().await.addr();
         info!(
-            "收到握手请求: 对端地址={}、节点名={}、节点ID={}、网络ID={:?}",
-            peer_addr, node_info.name, node_info.id, incoming_network_id_dbg
+            "收到握手请求: 对端地址={}、节点名={}、节点ID={}、网络ID={}",
+            peer_addr, node_info.name, node_info.id, node_info.network_id
         );
+
+        // 检查网络ID是否匹配
+        if node_info.network_id != self.local_node_info.network_id {
+            let error_msg = format!("网络ID不匹配: 期望 {}，收到 {}", self.local_node_info.network_id, node_info.network_id);
+            warn!("{}", error_msg);
+            let error_response = Message::error(error_msg.clone());
+            peer.read().await.send_message(&error_response).await?;
+            return Err(anyhow::anyhow!(error_msg));
+        }
 
         // 检查是否已经有相同ID的节点
         if self.peers.read().await.contains_key(&node_info.id) {
@@ -203,8 +210,8 @@ impl PeerManager {
         }
 
         // 网络ID由客户端提供；如果缺失则拒绝
-        let incoming_network_id = node_info.metadata.get("network_id").cloned();
-        if incoming_network_id.as_deref().map(|s| s.is_empty()).unwrap_or(true) {
+        let incoming_network_id = node_info.network_id.clone();
+        if incoming_network_id.is_empty() {
             let error_msg = "握手请求缺少 network_id".to_string();
             let error_response = Message::error(error_msg.clone());
             peer.read().await.send_message(&error_response).await?;
@@ -240,24 +247,15 @@ impl PeerManager {
         
         // 发送握手响应：回显客户端的 network_id
         let mut local_info = self.local_node_info.clone();
-        if let Some(net_id) = incoming_network_id.clone() {
-            local_info.add_metadata("network_id".to_string(), net_id);
-        }
-        info!(
-            "发送握手响应: 本地节点名={}、节点ID={}、回显网络ID={:?} 给 {}",
-            local_info.name, local_info.id,
-            local_info.metadata.get("network_id").cloned(),
-            peer_addr
-        );
+        local_info.network_id = incoming_network_id;
         let response = Message::handshake_response(local_info, true);
+        
         peer.read().await.send_message(&response).await?;
-        
-        info!("握手成功: {} ({})", node_info.name, node_info.id);
-        
+
         Ok(())
     }
     
-    /// 处理握手响应
+    /// 处理节点发现请求
     pub async fn handle_handshake_response(
         &self,
         peer: Arc<RwLock<Peer>>, 

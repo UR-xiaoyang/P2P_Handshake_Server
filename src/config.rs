@@ -29,18 +29,6 @@ pub struct Config {
 }
 
 impl Config {
-    pub fn new(listen_address: SocketAddr, max_connections: usize) -> Self {
-        Self {
-            listen_address,
-            max_connections,
-            heartbeat_interval: 30,
-            connection_timeout: 60,
-            discovery_port_range: (8081, 8090),
-            enable_discovery: true,
-            network_id: "p2p_default".to_string(),
-        }
-    }
-    
     pub fn from_file(path: &str) -> Result<Self> {
         let content = fs::read_to_string(path)?;
         let config: Config = serde_json::from_str(&content)?;
@@ -56,6 +44,14 @@ impl Config {
 
 impl Default for Config {
     fn default() -> Self {
-        Self::new("127.0.0.1:8080".parse().unwrap(), 100)
+        Self {
+            listen_address: "127.0.0.1:8080".parse().unwrap(),
+            max_connections: 100,
+            heartbeat_interval: 30,
+            connection_timeout: 60,
+            discovery_port_range: (8081, 8090),
+            enable_discovery: true,
+            network_id: "p2p_default".to_string(),
+        }
     }
 }

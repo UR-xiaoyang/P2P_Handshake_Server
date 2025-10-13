@@ -108,6 +108,28 @@ cargo run --bin p2p_server
 
 ## 命令行参数
 
+为了提供更灵活的配置方式，服务器支持通过命令行参数进行配置。这些参数会覆盖配置文件中的相应设置。
+
+- `--config <PATH>`: 指定配置文件的路径。
+- `--listen-address <ADDRESS>`: 设置服务器监听的IP地址和端口。
+- `--max-connections <NUMBER>`: 设置最大客户端连接数。
+- `--network-id <ID>`: 指定P2P网络的唯一标识符。
+- `--heartbeat-interval <SECONDS>`: 设置心跳消息的发送频率（秒）。
+- `--connection-timeout <SECONDS>`: 设置连接因不活动而超时的时长（秒）。
+- `--enable-discovery <true|false>`: 启用或禁用节点发现功能。
+
+#### 示例
+
+```bash
+# 使用指定的网络ID和监听地址启动服务器
+$ cargo run -- --network-id "my-test-network" --listen-address "127.0.0.1:9000"
+
+# 从配置文件加载配置，但覆盖最大连接数
+$ cargo run -- --config config.json --max-connections 200
+```
+
+## 设计
+
 ```bash
 p2p_server [OPTIONS]
 

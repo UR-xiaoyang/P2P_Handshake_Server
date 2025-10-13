@@ -4,5 +4,6 @@
   "heartbeat_interval": 30,
   "connection_timeout": 60,
   "discovery_port_range": [8081, 8090],
-  "enable_discovery": true
+  "enable_discovery": true,
+  "network_id": "test"
 }

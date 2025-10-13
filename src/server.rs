@@ -28,12 +28,9 @@ impl P2PServer {
         let mut local_node_info = NodeInfo::new(
             format!("p2p_node_{}", local_addr.port()),
             local_addr,
+            config.network_id.clone(), // 传递 network_id
         );
-        
-        // 添加服务器特定的元数据
-        local_node_info.add_metadata("server_type".to_string(), "handshake_server".to_string());
-        local_node_info.add_metadata("max_connections".to_string(), config.max_connections.to_string());
-        // 不在服务端固定network_id，由客户端在握手时提供并驱动
+        local_node_info.network_id = config.network_id.clone();
         
         let peer_manager = Arc::new(PeerManager::new(
             local_node_info.clone(),
@@ -102,6 +99,13 @@ impl P2PServer {
     }
     
     async fn handle_udp_packet(&self, data: Vec<u8>, sender_addr: std::net::SocketAddr) -> Result<()> {
+        // 打印最原始的UDP数据包内容
+        if let Ok(text) = std::str::from_utf8(&data) {
+            info!("收到来自 {} 的原始UDP数据包: {}", sender_addr, text);
+        } else {
+            info!("收到来自 {} 的原始UDP数据包 (非UTF-8): {:?}", sender_addr, data);
+        }
+        
         debug!("处理来自 {} 的UDP数据包: {} bytes", sender_addr, data.len());
         
         // 解析消息

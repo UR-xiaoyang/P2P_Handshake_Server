@@ -151,10 +151,11 @@ pub struct NodeInfo {
     pub listen_addr: SocketAddr,
     pub capabilities: Vec<String>,
     pub metadata: HashMap<String, String>,
+    pub network_id: String, // 新增 network_id 字段
 }
 
 impl NodeInfo {
-    pub fn new(name: String, listen_addr: SocketAddr) -> Self {
+    pub fn new(name: String, listen_addr: SocketAddr, network_id: String) -> Self {
         Self {
             id: Uuid::new_v4(),
             name,
@@ -166,6 +167,7 @@ impl NodeInfo {
                 "data_transfer".to_string(),
             ],
             metadata: HashMap::new(),
+            network_id,
         }
     }
     
