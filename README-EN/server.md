@@ -12,7 +12,7 @@ This document describes server initialization, UDP main loop, message handling, 
 ## Main Loop (Receive Packets)
 
 1. `recv_from` to get `(buffer, source_addr)`.
-2. Parse into `Message` including type, payload, and reliability fields.
+2. Parse into `Message` including type, payload, `sequence_number`, and reliability fields.
 3. Resolve/create `Connection` and `Peer` (indexed by `SocketAddr`).
 4. Dispatch to `handle_message(message)`.
 5. Log warnings/errors and clean up state when needed.
@@ -33,11 +33,13 @@ This document describes server initialization, UDP main loop, message handling, 
 
 - Heartbeat: Periodically send health checks; logs include "sending heartbeat to N peers".
 - Cleanup: Remove inactive or disconnected peers; logs include "peer cleanup".
-- Stats: Periodically emit counts of peers by state.
+- Stats: Periodically emit counts of peers by state (total/authenticated/connecting).
 - Combined with `tokio::join!(heartbeat_task, cleanup_task, stats_task)`:
   - Note: Example code may warn about `unused_must_use`; handle each result in production.
 
 ## Errors & Logging
+
+- Prefer setting log level via CLI args (higher precedence), e.g. `--INFO`, `--DEBUG`, `--TRACE`. If not specified, use the `RUST_LOG` environment variable.
 
 - Typical: `Failed to receive UDP packet` often occurs after client disconnect; downgrade to `debug` or suppress as needed.
 - Bind failures: port in use or permission issues; change port or adjust privileges.

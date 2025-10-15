@@ -252,6 +252,15 @@ impl PeerManager {
         
         peer.read().await.send_message(&response).await?;
 
+        // 在握手成功后，将当前已认证节点列表推送给新加入的客户端（排除其自身）
+        let peer_infos = self.get_peer_info_list_excluding(Some(node_info.id)).await;
+        let discovery_msg = Message::discovery_response(peer_infos);
+        if let Err(e) = peer.read().await.send_message(&discovery_msg).await {
+            warn!("发送节点列表到新客户端失败: {}", e);
+        }
+
+        // 广播延后，由服务器端进行去抖合并触发
+
         Ok(())
     }
     
@@ -342,6 +351,48 @@ impl PeerManager {
         }
         
         peer_infos
+    }
+
+    /// 获取对等节点信息列表（可排除指定节点）
+    pub async fn get_peer_info_list_excluding(&self, exclude_id: Option<Uuid>) -> Vec<PeerInfo> {
+        let peers = self.get_authenticated_peers().await;
+        let mut peer_infos = Vec::new();
+
+        for peer in peers {
+            let peer_guard = peer.read().await;
+            if let Some(node_info) = &peer_guard.node_info {
+                if let Some(ex_id) = exclude_id {
+                    if node_info.id == ex_id { continue; }
+                }
+                let peer_info = PeerInfo::new(
+                    node_info.id,
+                    node_info.listen_addr,
+                    node_info.capabilities.clone(),
+                );
+                peer_infos.push(peer_info);
+            }
+        }
+
+        peer_infos
+    }
+
+    /// 广播当前的节点信息列表到所有已认证节点（每个接收者的列表会排除其自身）
+    pub async fn broadcast_peer_list(&self, exclude_id: Option<Uuid>) -> Result<()> {
+        let peers = self.get_authenticated_peers().await;
+
+        for p in peers {
+            let pid = p.read().await.id;
+            if let Some(ex_id) = exclude_id {
+                if pid == ex_id { continue; }
+            }
+            let infos = self.get_peer_info_list_excluding(Some(pid)).await;
+            let msg = Message::discovery_response(infos);
+            if let Err(e) = p.read().await.send_message(&msg).await {
+                warn!("广播节点列表到 {} 失败: {}", p.read().await.addr(), e);
+            }
+        }
+
+        Ok(())
     }
     
     /// 清理断开的连接

@@ -7,7 +7,7 @@ This project is a P2P handshake server written in Rust. It has been migrated fro
 - `peer.rs`: Peer management indexed by `SocketAddr` to support connectionless operation; lookup and lifecycle.
 - `server.rs`: Main loop that receives packets, parses messages, dispatches handlers, and auto-sends ACK when required.
 - `examples/simple_client.rs`: UDP client example demonstrating handshake, data, ping/pong, and disconnect.
-- `router.rs`: Planned routing utilities for multi-hop forwarding and routing table maintenance.
+- `router.rs`: Routing layer (planned) for multi-hop forwarding and routing table maintenance; not integrated into the main flow yet.
 
 ## Motivation: Why UDP
 

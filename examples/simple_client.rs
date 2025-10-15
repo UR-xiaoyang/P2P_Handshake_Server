@@ -5,7 +5,7 @@ use std::net::SocketAddr;
 use std::time::Duration;
 use tokio::time::timeout;
 
-use p2p_handshake_server::protocol::{NodeInfo, Message, MessageType, HandshakeResponse};
+use p2p_handshake_server::protocol::{NodeInfo, Message, MessageType, HandshakeResponse, PeerInfo};
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -24,11 +24,10 @@ async fn main() -> Result<()> {
     println!("客户端绑定到: {}", local_addr);
     
     // 创建客户端节点信息
-    let mut client_info = NodeInfo::new("test_client".to_string(), local_addr);
+    // 设置网络ID与服务器一致（请确保与服务端 config.json 中的 network_id 匹配）
+    let mut client_info = NodeInfo::new("test_client".to_string(), local_addr, "test".to_string());
     client_info.add_capability("test".to_string());
     client_info.add_metadata("client_type".to_string(), "udp_test_client".to_string());
-    // 设置网络ID以便与服务器匹配
-    client_info.add_metadata("network_id".to_string(), "p2p_default".to_string());
     
     // 发送握手请求
     let handshake_request = Message::new_with_ack(
@@ -47,12 +46,12 @@ async fn main() -> Result<()> {
                 println!("收到握手响应: {:?}", response.payload);
                 // 解析并校验网络ID
                 if let Ok(resp) = serde_json::from_value::<HandshakeResponse>(response.payload.clone()) {
-                    let remote_net = resp.node_info.metadata.get("network_id");
-                    let local_net = client_info.metadata.get("network_id");
+                    let remote_net = resp.node_info.network_id.clone();
+                    let local_net = client_info.network_id.clone();
                     if remote_net == local_net {
-                        println!("网络ID匹配: {:?}", remote_net);
+                        println!("网络ID匹配: {}", remote_net);
                     } else {
-                        println!("网络ID不匹配: 本地={:?}, 对端={:?}", local_net, remote_net);
+                        println!("网络ID不匹配: 本地={}, 对端={}", local_net, remote_net);
                         return Ok(());
                     }
                 }
@@ -67,6 +66,29 @@ async fn main() -> Result<()> {
         }
     }
     
+    // 握手成功后，发送节点发现请求以获取其他已认证节点
+    let discovery_req = Message::discovery_request();
+    send_message(&socket, &discovery_req, server_addr).await?;
+    println!("已发送节点发现请求");
+
+    if let Some(resp) = receive_message(&socket).await? {
+        if resp.message_type == MessageType::DiscoveryResponse {
+            let peers: Vec<PeerInfo> = serde_json::from_value(resp.payload.clone())?;
+            println!("收到 {} 个已认证节点", peers.len());
+            for p in peers {
+                // 向发现的节点发送握手请求，扩展拓扑
+                let hs = Message::new_with_ack(
+                    MessageType::HandshakeRequest,
+                    serde_json::to_value(&client_info)?,
+                    local_addr,
+                    10,
+                );
+                send_message(&socket, &hs, p.addr).await?;
+                println!("向发现节点 {} 发送握手请求", p.addr);
+            }
+        }
+    }
+
     // 发送一些测试数据
     let test_data = serde_json::json!({
         "message": "Hello from UDP client!",

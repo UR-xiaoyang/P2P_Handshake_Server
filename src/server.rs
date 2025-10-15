@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use tokio::sync::Mutex;
 use std::time::Duration;
 use tokio::time::interval;
 use tokio::select;
@@ -9,14 +10,20 @@ use uuid::Uuid;
 use crate::config::Config;
 use crate::network::NetworkManager;
 use crate::peer::{PeerManager, Peer, PeerStatus};
-use crate::protocol::{NodeInfo, Message, MessageType};
+use crate::protocol::{NodeInfo, Message, MessageType, PeerInfo, HandshakeProtocol};
+use crate::router::{MessageRouter, RoutedMessage};
 
 pub struct P2PServer {
     config: Config,
     network_manager: NetworkManager,
     peer_manager: Arc<PeerManager>,
     local_node_info: NodeInfo,
+    message_router: Arc<MessageRouter>,
     shutdown_tx: Option<tokio::sync::broadcast::Sender<()>>,
+    /// 去抖后的节点列表广播任务句柄
+    broadcast_task: Arc<Mutex<Option<tokio::task::JoinHandle<()>>>>,
+    /// 在去抖窗口内需要排除的节点ID（只排除最后一次加入的节点）
+    broadcast_exclude_id: Arc<Mutex<Option<Uuid>>>,
 }
 
 impl P2PServer {
@@ -36,6 +43,12 @@ impl P2PServer {
             local_node_info.clone(),
             config.max_connections,
         ));
+        let message_router = Arc::new(MessageRouter::new(
+            local_node_info.id,
+            peer_manager.clone(),
+        ));
+        // 启动路由器的消息缓存清理任务
+        let _cache_task = message_router.start_cache_cleanup_task();
         
         info!("P2P服务器初始化完成");
         info!("节点ID: {}", local_node_info.id);
@@ -47,8 +60,49 @@ impl P2PServer {
             network_manager,
             peer_manager,
             local_node_info,
+            message_router,
             shutdown_tx: None,
+            broadcast_task: Arc::new(Mutex::new(None)),
+            broadcast_exclude_id: Arc::new(Mutex::new(None)),
         })
+    }
+
+    /// 调度一次去抖的节点列表广播，将在窗口结束后向所有节点推送当前列表
+    async fn schedule_peerlist_broadcast(&self, exclude_id: Option<Uuid>) {
+        // 记录最后一次加入的节点ID，用于在广播时排除该节点
+        *self.broadcast_exclude_id.lock().await = exclude_id;
+
+        // 取消已有任务并重置窗口
+        if let Some(handle) = self.broadcast_task.lock().await.take() {
+            handle.abort();
+        }
+
+        let peer_manager = self.peer_manager.clone();
+        let exclude_arc = self.broadcast_exclude_id.clone();
+        let delay_ms = self.config.peerlist_broadcast_debounce_ms;
+
+        let handle = tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(delay_ms)).await;
+            // 取出并清空待排除ID
+            let exclude_id = {
+                let mut ex = exclude_arc.lock().await;
+                std::mem::take(&mut *ex)
+            };
+
+            // 广播（按接收者定制，不发送给处于排除列表的节点）
+            let peers = peer_manager.get_authenticated_peers().await;
+            for p in peers {
+                let pid = p.read().await.id;
+                if exclude_id == Some(pid) { continue; }
+                let infos = peer_manager.get_peer_info_list_excluding(Some(pid)).await;
+                let msg = Message::discovery_response(infos);
+                if let Err(e) = p.read().await.send_message(&msg).await {
+                    warn!("去抖广播节点列表到 {} 失败: {}", p.read().await.addr(), e);
+                }
+            }
+        });
+
+        *self.broadcast_task.lock().await = Some(handle);
     }
     
     pub async fn run(&mut self) -> Result<()> {
@@ -150,11 +204,28 @@ impl P2PServer {
         match message.message_type {
             MessageType::HandshakeRequest => {
                 info!("处理握手请求消息，来自 {}", peer.read().await.addr());
+                // 先解析以便在路由表中添加直连路由
+                if let Ok(node_info) = HandshakeProtocol::validate_handshake_request(message) {
+                    self.message_router
+                        .update_routing_table(node_info.id, node_info.id, 1)
+                        .await;
+                    // 处理握手
+                    self.peer_manager.handle_handshake_request(peer, message).await?;
+                    // 去抖调度一次广播，排除该新加入节点，避免重复推送
+                    self.schedule_peerlist_broadcast(Some(node_info.id)).await;
+                    return Ok(());
+                }
+                // 验证失败仍尝试交由处理函数返回错误
                 self.peer_manager.handle_handshake_request(peer, message).await?;
             }
             MessageType::HandshakeResponse => {
                 info!("处理握手响应消息，来自 {}", peer.read().await.addr());
-                self.peer_manager.handle_handshake_response(peer, message).await?;
+                self.peer_manager.handle_handshake_response(peer.clone(), message).await?;
+                // 握手成功后，添加直连路由（距离为1）
+                let remote_id = peer.read().await.id;
+                self.message_router
+                    .update_routing_table(remote_id, remote_id, 1)
+                    .await;
             }
             MessageType::Ping => {
                 info!("收到Ping，来自 {}", peer.read().await.addr());
@@ -167,13 +238,48 @@ impl P2PServer {
             MessageType::DiscoveryRequest => {
                 Self::handle_discovery_request(&self.peer_manager, peer, message).await?;
             }
+            MessageType::DiscoveryResponse => {
+                info!("收到节点发现响应，来自 {}", peer.read().await.addr());
+                // 解析对端提供的节点信息列表，并更新路由表（经该对端的下一跳，距离为2）
+                if let Ok(peer_list) = serde_json::from_value::<Vec<PeerInfo>>(message.payload.clone()) {
+                    let next_hop = peer.read().await.id;
+                    for p in &peer_list {
+                        // 跳过本地节点和对端自身
+                        if p.id == self.local_node_info.id || p.id == next_hop {
+                            continue;
+                        }
+                        self.message_router
+                            .update_routing_table(p.id, next_hop, 2)
+                            .await;
+                    }
+                    debug!("从 {} 更新路由项 {} 条", peer.read().await.addr(), peer_list.len());
+                } else {
+                    warn!("解析节点发现响应失败");
+                }
+            }
             MessageType::Data => {
                 info!("收到数据消息，来自 {}", peer.read().await.addr());
-                Self::handle_data_message(peer, message).await?;
+                // 尝试作为路由消息处理
+                match RoutedMessage::from_message(message) {
+                    Ok(routed) => {
+                        self.message_router.forward_message(routed).await?;
+                    }
+                    Err(_) => {
+                        // 非路由包，按原有逻辑处理
+                        self.handle_data_message(peer, message).await?;
+                    }
+                }
             }
             MessageType::Disconnect => {
                 info!("节点 {} 请求断开连接", peer.read().await.id);
                 peer.write().await.update_status(PeerStatus::Disconnected);
+                // 移除相关路由
+                let pid = peer.read().await.id;
+                self.message_router.remove_node_routes(&pid).await;
+                // 立即从PeerManager移除，并调度一次去抖广播以通知其他节点
+                self.peer_manager.remove_peer(&pid).await;
+                // 断开不需要排除某个接收者
+                self.schedule_peerlist_broadcast(None).await;
             }
             MessageType::Ack => {
                 info!("收到ACK消息: ack_for={:?} 来自 {}", message.ack_for, peer.read().await.addr());
@@ -191,6 +297,7 @@ impl P2PServer {
     }
 
     async fn handle_peer_messages(
+        &self,
         peer_manager: Arc<PeerManager>,
         peer: Arc<tokio::sync::RwLock<Peer>>,
     ) -> Result<()> {
@@ -230,8 +337,28 @@ impl P2PServer {
                 MessageType::DiscoveryRequest => {
                     Self::handle_discovery_request(&peer_manager, peer.clone(), &message).await
                 }
+                MessageType::DiscoveryResponse => {
+                    // 更新路由表（经该对端的下一跳，距离为2）
+                    if let Ok(peer_list) = serde_json::from_value::<Vec<PeerInfo>>(message.payload.clone()) {
+                        let next_hop = peer.read().await.id;
+                        for p in peer_list {
+                            if p.id == next_hop { continue; }
+                        }
+                    }
+                    Ok(())
+                }
                 MessageType::Data => {
-                    Self::handle_data_message(peer.clone(), &message).await
+                    // 尝试作为路由消息处理
+                    match RoutedMessage::from_message(&message) {
+                        Ok(routed) => {
+                            // 这里无法访问 server 的 router；该函数目前未在运行循环中使用
+                            debug!("收到路由数据消息，route_id={:?}", routed.route_id);
+                            Ok(())
+                        }
+                        Err(_) => {
+                            self.handle_data_message(peer.clone(), &message).await
+                        }
+                    }
                 }
                 MessageType::Disconnect => {
                     info!("对等节点 {} 请求断开连接", peer_addr);
@@ -273,7 +400,8 @@ impl P2PServer {
         peer: Arc<tokio::sync::RwLock<Peer>>,
         _message: &Message,
     ) -> Result<()> {
-        let peer_infos = peer_manager.get_peer_info_list().await;
+        let requester_id = peer.read().await.id;
+        let peer_infos = peer_manager.get_peer_info_list_excluding(Some(requester_id)).await;
         let response = Message::discovery_response(peer_infos);
         
         peer.read().await.send_message(&response).await?;
@@ -284,6 +412,7 @@ impl P2PServer {
     }
     
     async fn handle_data_message(
+        &self,
         peer: Arc<tokio::sync::RwLock<Peer>>,
         message: &Message,
     ) -> Result<()> {
@@ -292,7 +421,27 @@ impl P2PServer {
         
         debug!("从 {} 接收到数据消息: {:?}", peer.read().await.addr(), message.payload);
         
-        // 简单的回显响应
+        // 命令：获取路由快照
+        if let Some(obj) = message.payload.as_object() {
+            if let Some(cmd) = obj.get("cmd").and_then(|v| v.as_str()) {
+                if cmd == "get_routes" {
+                    let snapshot = self.message_router.get_routing_table_snapshot().await;
+                    let routes: Vec<serde_json::Value> = snapshot
+                        .into_iter()
+                        .map(|(dest, next_hop, distance)| serde_json::json!({
+                            "destination": dest,
+                            "next_hop": next_hop,
+                            "distance": distance
+                        }))
+                        .collect();
+                    let resp = Message::data(serde_json::json!({ "routes": routes }));
+                    peer.read().await.send_message(&resp).await?;
+                    return Ok(());
+                }
+            }
+        }
+
+        // 简单的回显响应（默认行为）
         let echo_response = Message::data(serde_json::json!({
             "echo": message.payload,
             "timestamp": std::time::SystemTime::now()
@@ -300,7 +449,6 @@ impl P2PServer {
                 .unwrap()
                 .as_secs()
         }));
-        
         peer.read().await.send_message(&echo_response).await?;
         
         Ok(())
@@ -416,6 +564,17 @@ impl P2PServer {
         
         info!("服务器关闭完成");
         Ok(())
+    }
+
+    /// 通过路由向指定节点发送数据
+    pub async fn send_routed_data(
+        &self,
+        destination: Uuid,
+        data: serde_json::Value,
+        max_hops: u32,
+    ) -> Result<()> {
+        let message = Message::data(data);
+        self.message_router.route_message(message, destination, max_hops).await
     }
 }
 

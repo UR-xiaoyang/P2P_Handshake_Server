@@ -262,7 +262,11 @@ mod tests {
     
     #[test]
     fn test_message_creation() {
-        let node_info = NodeInfo::new("test_node".to_string(), "127.0.0.1:8080".parse().unwrap());
+        let node_info = NodeInfo::new(
+            "test_node".to_string(),
+            "127.0.0.1:8080".parse().unwrap(),
+            "testnet".to_string(),
+        );
         let message = Message::handshake_request(node_info);
         
         assert_eq!(message.message_type, MessageType::HandshakeRequest);
@@ -271,7 +275,11 @@ mod tests {
     
     #[test]
     fn test_handshake_validation() {
-        let node_info = NodeInfo::new("test_node".to_string(), "127.0.0.1:8080".parse().unwrap());
+        let node_info = NodeInfo::new(
+            "test_node".to_string(),
+            "127.0.0.1:8080".parse().unwrap(),
+            "testnet".to_string(),
+        );
         let message = Message::handshake_request(node_info.clone());
         
         let result = HandshakeProtocol::validate_handshake_request(&message);

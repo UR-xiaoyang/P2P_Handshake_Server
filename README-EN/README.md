@@ -7,7 +7,7 @@ A high-performance P2P handshake server written in Rust, migrated from TCP to UD
 - High-performance async networking with `Tokio`
 - Complete P2P handshake protocol with node authentication
 - Peer discovery (config-ready; broadcasting/MDNS optional)
-- Intelligent message routing (module planned)
+- Intelligent message routing (integrated)
 - Efficient peer lifecycle management
 - JSON-based flexible configuration
 - Comprehensive logging
@@ -86,6 +86,10 @@ OPTIONS:
   -a, --address <ADDRESS>         Server listen address [default: 127.0.0.1:8080]
   -m, --max-connections <NUMBER>  Max connections [default: 100]
   -c, --config <FILE>             Config file path
+      --network-id <ID>           Network ID for isolation/validation
+      --heartbeat-interval <SEC>  Heartbeat interval (seconds)
+      --connection-timeout <SEC>  Connection timeout (seconds)
+      --enable-discovery <BOOL>   Enable peer discovery
       --TRACE                     Set log level to TRACE (mutually exclusive)
       --DEBUG                     Set log level to DEBUG (mutually exclusive)
       --INFO                      Set log level to INFO (mutually exclusive)
@@ -145,7 +149,18 @@ Client                            Server
 - `peer.rs`: peer management via `SocketAddr` index
 - `server.rs`: main loop receiving packets, parsing, handling, auto-ACK
 - `examples/simple_client.rs`: UDP client with handshake, data, ping/pong, disconnect
-- `router.rs`: planned routing utilities (not yet integrated)
+- `router.rs`: integrated routing module (multi-hop forwarding, broadcast fallback)
+
+## Documentation
+
+- Overview: `README-EN/overview.md`
+- Server Mechanics: `README-EN/server.md`
+- Protocol: `README-EN/protocol.md`
+- Reliability: `README-EN/reliability.md`
+- Routing: `README-EN/routing.md`
+- Peer Discovery: `README-EN/discovery.md`
+- Client Mechanics: `README-EN/client.md`
+- Network ID & Configuration: `README-EN/network.md`
 
 ## Usage as a Library
 

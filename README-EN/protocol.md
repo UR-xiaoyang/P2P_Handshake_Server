@@ -52,6 +52,11 @@ Client                            Server
   |                 [Authenticated]
 ```
 
+Notes:
+- The client may set `requires_ack` on `HandshakeRequest`; the server replies with `Ack`.
+- The server may require ACK for `HandshakeResponse`; the client should confirm.
+- If an ACK is not received within the timeout window, trigger `Retransmit` (see Reliability).
+
 ## Heartbeat & Data
 
 - `Ping`/`Pong`: Either side can initiate; measure health and latency.

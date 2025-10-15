@@ -370,6 +370,12 @@ impl MessageRouter {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::peer::{PeerManager, PeerStatus};
+    use crate::network::Connection;
+    use crate::protocol::{NodeInfo, Message, MessageType};
+    use tokio::net::UdpSocket;
+    use std::sync::Arc;
+    use tokio::time::{timeout, Duration};
     
     #[test]
     fn test_routing_table() {
@@ -397,5 +403,135 @@ mod tests {
         assert_eq!(routed.hop_count, 0);
         assert!(routed.increment_hop());
         assert_eq!(routed.hop_count, 1);
+    }
+
+    #[tokio::test]
+    async fn test_forward_via_next_hop() {
+        // 建立两个UDP套接字，模拟本地与下一跳对端
+        let sock_local = Arc::new(UdpSocket::bind("127.0.0.1:0").await.unwrap());
+        let local_addr = sock_local.local_addr().unwrap();
+        let sock_next = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let next_addr = sock_next.local_addr().unwrap();
+
+        // 创建到下一跳的连接（使用本地socket向 next_addr 发送）
+        let conn = Arc::new(Connection::new(sock_local.clone(), next_addr, local_addr));
+
+        let local_info = NodeInfo::new("local_test".to_string(), local_addr, "testnet".to_string());
+        let peer_manager = Arc::new(PeerManager::new(local_info.clone(), 10));
+
+        // 加入一个已认证的下一跳节点
+        let peer = peer_manager.add_peer(conn.clone()).await.unwrap();
+        peer.write().await.update_status(PeerStatus::Authenticated);
+        let next_hop_id = peer.read().await.id;
+
+        let router = MessageRouter::new(local_info.id, peer_manager.clone());
+
+        // 为随机目的地添加路由，下一跳为已加入的peer
+        let dest = Uuid::new_v4();
+        router.update_routing_table(dest, next_hop_id, 1).await;
+
+        // 发送路由数据消息，应成功通过下一跳发送
+        let msg = Message::data(serde_json::json!({"k":"v"}));
+        let res = router.route_message(msg, dest, 10).await;
+        assert!(res.is_ok());
+
+        // 在下一跳socket上接收并断言内容
+        let mut buf = vec![0u8; 65536];
+        let (len, _from) = timeout(Duration::from_millis(300), sock_next.recv_from(&mut buf)).await.unwrap().unwrap();
+        buf.truncate(len);
+        let received: Message = serde_json::from_slice(&buf).unwrap();
+        assert_eq!(received.message_type, MessageType::Data);
+        let routed = RoutedMessage::from_message(&received).unwrap();
+        assert_eq!(routed.destination_node, dest);
+        assert_eq!(routed.source_node, local_info.id);
+    }
+
+    #[tokio::test]
+    async fn test_broadcast_when_no_route() {
+        // 一个发送socket，两个不同的对端地址
+        let sock_local = Arc::new(UdpSocket::bind("127.0.0.1:0").await.unwrap());
+        let local_addr = sock_local.local_addr().unwrap();
+        let sock_peer1 = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let addr1 = sock_peer1.local_addr().unwrap();
+        let sock_peer2 = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let addr2 = sock_peer2.local_addr().unwrap();
+
+        let conn1 = Arc::new(Connection::new(sock_local.clone(), addr1, local_addr));
+        let conn2 = Arc::new(Connection::new(sock_local.clone(), addr2, local_addr));
+
+        let local_info = NodeInfo::new("local_test".to_string(), local_addr, "testnet".to_string());
+        let peer_manager = Arc::new(PeerManager::new(local_info.clone(), 10));
+
+        let p1 = peer_manager.add_peer(conn1.clone()).await.unwrap();
+        p1.write().await.update_status(PeerStatus::Authenticated);
+        let p2 = peer_manager.add_peer(conn2.clone()).await.unwrap();
+        p2.write().await.update_status(PeerStatus::Authenticated);
+
+        let router = MessageRouter::new(local_info.id, peer_manager.clone());
+
+        // 随机目的地没有路由，触发广播到所有已认证节点
+        let dest = Uuid::new_v4();
+        let msg = Message::data(serde_json::json!({"broadcast":"yes"}));
+        let res = router.route_message(msg, dest, 10).await;
+        assert!(res.is_ok());
+
+        // 两个对端都应接收到消息
+        let mut buf1 = vec![0u8; 65536];
+        let (len1, _from1) = timeout(Duration::from_millis(300), sock_peer1.recv_from(&mut buf1)).await.unwrap().unwrap();
+        buf1.truncate(len1);
+        let recv1: Message = serde_json::from_slice(&buf1).unwrap();
+        assert_eq!(recv1.message_type, MessageType::Data);
+        let routed1 = RoutedMessage::from_message(&recv1).unwrap();
+        assert_eq!(routed1.destination_node, dest);
+
+        let mut buf2 = vec![0u8; 65536];
+        let (len2, _from2) = timeout(Duration::from_millis(300), sock_peer2.recv_from(&mut buf2)).await.unwrap().unwrap();
+        buf2.truncate(len2);
+        let recv2: Message = serde_json::from_slice(&buf2).unwrap();
+        assert_eq!(recv2.message_type, MessageType::Data);
+        let routed2 = RoutedMessage::from_message(&recv2).unwrap();
+        assert_eq!(routed2.destination_node, dest);
+    }
+
+    #[tokio::test]
+    async fn test_unreachable_next_hop_removes_route_and_broadcasts() {
+        // 一个发送socket和一个已认证peer，用于接收广播
+        let sock_local = Arc::new(UdpSocket::bind("127.0.0.1:0").await.unwrap());
+        let local_addr = sock_local.local_addr().unwrap();
+        let sock_peer = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let addr_peer = sock_peer.local_addr().unwrap();
+
+        let conn_peer = Arc::new(Connection::new(sock_local.clone(), addr_peer, local_addr));
+
+        let local_info = NodeInfo::new("local_test".to_string(), local_addr, "testnet".to_string());
+        let peer_manager = Arc::new(PeerManager::new(local_info.clone(), 10));
+
+        let p = peer_manager.add_peer(conn_peer.clone()).await.unwrap();
+        p.write().await.update_status(PeerStatus::Authenticated);
+
+        let router = MessageRouter::new(local_info.id, peer_manager.clone());
+
+        // 为目的地添加一个不可达的下一跳（未加入到PeerManager），随后应移除此路由并广播
+        let dest = Uuid::new_v4();
+        let unreachable_next_hop = Uuid::new_v4();
+        router.update_routing_table(dest, unreachable_next_hop, 1).await;
+
+        let msg = Message::data(serde_json::json!({"payload":"x"}));
+        let res = router.route_message(msg, dest, 5).await;
+        assert!(res.is_ok());
+
+        // 应广播到已认证peer
+        let mut buf = vec![0u8; 65536];
+        let (len, _from) = timeout(Duration::from_millis(300), sock_peer.recv_from(&mut buf)).await.unwrap().unwrap();
+        buf.truncate(len);
+        let received: Message = serde_json::from_slice(&buf).unwrap();
+        assert_eq!(received.message_type, MessageType::Data);
+        let routed = RoutedMessage::from_message(&received).unwrap();
+        assert_eq!(routed.destination_node, dest);
+
+        // 路由表快照中不应再存在该目的地的条目
+        let snapshot = router.get_routing_table_snapshot().await;
+        let still_exists = snapshot.iter().any(|(d, _, _)| *d == dest);
+        assert!(!still_exists);
     }
 }

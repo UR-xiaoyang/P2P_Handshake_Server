@@ -26,6 +26,9 @@ pub struct Config {
 
     /// 网络ID（用于网络隔离与校验）
     pub network_id: String,
+
+    /// 节点列表广播去抖时间（毫秒），用于合并短时间内的拓扑变化
+    pub peerlist_broadcast_debounce_ms: u64,
 }
 
 impl Config {
@@ -52,6 +55,7 @@ impl Default for Config {
             discovery_port_range: (8081, 8090),
             enable_discovery: true,
             network_id: "p2p_default".to_string(),
+            peerlist_broadcast_debounce_ms: 300,
         }
     }
 }
