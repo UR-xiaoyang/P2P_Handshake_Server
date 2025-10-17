@@ -38,6 +38,7 @@ impl Config {
         Ok(config)
     }
     
+    #[allow(dead_code)]
     pub fn to_file(&self, path: &str) -> Result<()> {
         let content = serde_json::to_string_pretty(self)?;
         fs::write(path, content)?;

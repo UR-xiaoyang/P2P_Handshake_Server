@@ -4,8 +4,8 @@ use std::sync::Arc;
 use tokio::net::UdpSocket;
 use tokio::sync::RwLock;
 use anyhow::{Result, Context};
-use log::{info, warn, error, debug};
-use serde_json;
+use log::{info, debug};
+
 
 use crate::protocol::Message;
 
@@ -14,6 +14,8 @@ use crate::protocol::Message;
 pub struct Connection {
     socket: Arc<UdpSocket>,
     peer_addr: SocketAddr,
+
+    #[allow(dead_code)]
     local_addr: SocketAddr,
 }
 
@@ -30,6 +32,7 @@ impl Connection {
         self.peer_addr
     }
     
+    #[allow(dead_code)]
     pub fn local_addr(&self) -> SocketAddr {
         self.local_addr
     }
@@ -82,6 +85,7 @@ impl NetworkManager {
     }
     
     /// 获取本地监听地址
+    #[allow(dead_code)]
     pub fn local_addr(&self) -> SocketAddr {
         self.local_addr
     }
@@ -124,6 +128,7 @@ impl NetworkManager {
     }
     
     /// 移除连接
+    #[allow(dead_code)]
     pub async fn remove_connection(&self, peer_addr: &SocketAddr) {
         let mut connections = self.connections.write().await;
         if connections.remove(peer_addr).is_some() {
@@ -132,12 +137,14 @@ impl NetworkManager {
     }
     
     /// 获取所有活跃连接
+    #[allow(dead_code)]
     pub async fn get_all_connections(&self) -> Vec<Arc<Connection>> {
         let connections = self.connections.read().await;
         connections.values().cloned().collect()
     }
     
     /// 主动连接到对等节点（UDP中实际上是创建连接对象）
+    #[allow(dead_code)]
     pub async fn connect_to_peer(&self, addr: SocketAddr) -> Result<Arc<Connection>> {
         let connection = self.get_or_create_connection(addr).await;
         info!("准备连接到UDP对等节点 {}", addr);

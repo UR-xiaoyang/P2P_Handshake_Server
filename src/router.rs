@@ -2,12 +2,12 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use uuid::Uuid;
-use log::{info, warn, debug, error};
+use log::{info, warn, debug};
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
 use crate::protocol::{Message, MessageType};
-use crate::peer::{PeerManager, Peer};
+use crate::peer::PeerManager;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RoutingTable {
@@ -15,6 +15,10 @@ pub struct RoutingTable {
     routes: HashMap<Uuid, Uuid>,
     /// 节点ID到距离的映射
     distances: HashMap<Uuid, u32>,
+}
+
+impl Default for RoutingTable {
+    fn default() -> Self { Self::new() }
 }
 
 impl RoutingTable { // 路由表
@@ -50,6 +54,7 @@ impl RoutingTable { // 路由表
     }
     
     /// 获取到目标节点的距离
+    #[allow(dead_code)]
     pub fn get_distance(&self, destination: &Uuid) -> Option<u32> {
         self.distances.get(destination).copied()
     }
@@ -102,6 +107,7 @@ pub struct RoutedMessage {
 }
 
 impl RoutedMessage {
+    #[allow(dead_code)]
     pub fn new(
         message: Message,
         source: Uuid,
@@ -163,6 +169,7 @@ impl MessageRouter {
     }
     
     /// 路由消息到目标节点
+    #[allow(dead_code)]
     pub async fn route_message(
         &self,
         message: Message,
@@ -406,6 +413,7 @@ impl MessageRouter {
     }
     
     /// 处理路由发现
+    #[allow(dead_code)]
     pub async fn handle_route_discovery(&self, source: Uuid, target: Uuid) -> Result<()> {
         debug!("处理路由发现: source={} target={}", source, target);
         // 简单的路由发现：如果我们知道目标节点，返回路由信息

@@ -7,9 +7,10 @@ use log::{info, warn, debug};
 use anyhow::Result;
 
 use crate::network::Connection;
-use crate::protocol::{NodeInfo, PeerInfo, Message, MessageType, HandshakeProtocol};
+use crate::protocol::{NodeInfo, PeerInfo, Message, HandshakeProtocol};
 
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub enum PeerStatus {
     Connecting,
     Connected,
@@ -26,6 +27,7 @@ pub struct Peer {
     pub connection: Arc<Connection>,
     pub status: PeerStatus,
     pub last_ping: Option<std::time::Instant>,
+    #[allow(dead_code)]
     pub created_at: std::time::Instant,
 }
 
@@ -41,6 +43,7 @@ impl Peer {
         }
     }
     
+    #[allow(dead_code)]
     pub fn with_node_info(connection: Arc<Connection>, node_info: NodeInfo) -> Self {
         Self {
             id: node_info.id,
@@ -347,6 +350,7 @@ impl PeerManager {
     }
     
     /// 获取对等节点信息列表
+    #[allow(dead_code)]
     pub async fn get_peer_info_list(&self) -> Vec<PeerInfo> {
         let peers = self.get_authenticated_peers().await;
         let mut peer_infos = Vec::new();
@@ -390,6 +394,7 @@ impl PeerManager {
     }
 
     /// 广播当前的节点信息列表到所有已认证节点（每个接收者的列表会排除其自身）
+    #[allow(dead_code)]
     pub async fn broadcast_peer_list(&self, exclude_id: Option<Uuid>) -> Result<()> {
         let peers = self.get_authenticated_peers().await;
 

@@ -100,6 +100,7 @@ impl Message {
         }
     }
     
+    #[allow(dead_code)]
     pub fn handshake_request(node_info: NodeInfo) -> Self {
         let payload = serde_json::to_value(node_info).unwrap();
         Self::new(MessageType::HandshakeRequest, payload)
@@ -123,6 +124,7 @@ impl Message {
         Self::new(MessageType::Pong, serde_json::Value::Null)
     }
     
+    #[allow(dead_code)]
     pub fn discovery_request() -> Self {
         Self::new(MessageType::DiscoveryRequest, serde_json::Value::Null)
     }
@@ -146,6 +148,7 @@ impl Message {
         Self::new(MessageType::Disconnect, payload)
     }
 
+    #[allow(dead_code)]
     pub fn list_nodes_request() -> Self {
         Self::new(MessageType::ListNodesRequest, serde_json::Value::Null)
     }
@@ -185,12 +188,14 @@ impl NodeInfo {
         }
     }
     
+    #[allow(dead_code)]
     pub fn add_capability(&mut self, capability: String) {
         if !self.capabilities.contains(&capability) {
             self.capabilities.push(capability);
         }
     }
     
+    #[allow(dead_code)]
     pub fn add_metadata(&mut self, key: String, value: String) {
         self.metadata.insert(key, value);
     }
@@ -229,6 +234,7 @@ impl PeerInfo {
         }
     }
     
+    #[allow(dead_code)]
     pub fn update_last_seen(&mut self) {
         self.last_seen = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)

@@ -146,7 +146,16 @@ impl P2PServer {
         }
         
         // 等待所有任务完成
-        tokio::join!(heartbeat_task, cleanup_task, stats_task);
+        let (hb_res, cl_res, st_res) = tokio::join!(heartbeat_task, cleanup_task, stats_task);
+        if let Err(e) = hb_res {
+            warn!("心跳任务结束时发生错误: {}", e);
+        }
+        if let Err(e) = cl_res {
+            warn!("清理任务结束时发生错误: {}", e);
+        }
+        if let Err(e) = st_res {
+            warn!("统计任务结束时发生错误: {}", e);
+        }
         
         info!("P2P服务器已停止");
         Ok(())
@@ -308,6 +317,7 @@ impl P2PServer {
         Ok(())
     }
 
+    #[allow(dead_code)]
     async fn handle_peer_messages(
         &self,
         peer_manager: Arc<PeerManager>,
@@ -527,6 +537,7 @@ impl P2PServer {
     }
     
     /// 主动连接到其他节点
+    #[allow(dead_code)]
     pub async fn connect_to_peer(&self, addr: std::net::SocketAddr) -> Result<()> {
         info!("尝试连接到UDP对等节点: {}", addr);
         
@@ -545,6 +556,7 @@ impl P2PServer {
     }
     
     /// 获取服务器统计信息
+    #[allow(dead_code)]
     pub async fn get_stats(&self) -> ServerStats {
         let peer_stats = self.peer_manager.get_stats().await;
         
@@ -560,6 +572,7 @@ impl P2PServer {
     }
     
     /// 优雅关闭服务器
+    #[allow(dead_code)]
     pub async fn shutdown(&self) -> Result<()> {
         if let Some(tx) = &self.shutdown_tx {
             tx.send(()).context("发送关闭信号失败")?;
@@ -579,6 +592,7 @@ impl P2PServer {
     }
 
     /// 通过路由向指定节点发送数据
+    #[allow(dead_code)]
     pub async fn send_routed_data(
         &self,
         destination: Uuid,
@@ -591,6 +605,7 @@ impl P2PServer {
 }
 
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct ServerStats {
     pub node_id: Uuid,
     pub listen_address: std::net::SocketAddr,
