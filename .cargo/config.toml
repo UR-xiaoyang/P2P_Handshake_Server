@@ -12,3 +12,8 @@ ar = "arm-linux-gnueabihf-ar"
 
 [target.x86_64-unknown-linux-musl]
 linker = "rust-lld"
+
+# MIPS big-endian Linux GNU
+[target.mips-unknown-linux-gnu]
+linker = "mips-linux-gnu-gcc"
+ar = "mips-linux-gnu-ar"
