@@ -17,7 +17,7 @@ pub struct RoutingTable {
     distances: HashMap<Uuid, u32>,
 }
 
-impl RoutingTable {
+impl RoutingTable { // 路由表
     pub fn new() -> Self {
         Self {
             routes: HashMap::new(),
@@ -30,6 +30,10 @@ impl RoutingTable {
         // 只有当新路由距离更短时才更新
         if let Some(&existing_distance) = self.distances.get(&destination) {
             if distance >= existing_distance {
+                debug!(
+                    "忽略更长或相同距离的路由更新: {} -> {} (新距离: {}, 现有: {})",
+                    destination, next_hop, distance, existing_distance
+                );
                 return;
             }
         }
@@ -64,6 +68,11 @@ impl RoutingTable {
             .filter(|(_, &hop)| hop == *next_hop)
             .map(|(&dest, _)| dest)
             .collect();
+        debug!(
+            "移除经由下一跳 {} 的路由条目数量: {}",
+            next_hop,
+            to_remove.len()
+        );
         
         for dest in to_remove {
             self.remove_route(&dest);
@@ -160,8 +169,14 @@ impl MessageRouter {
         destination: Uuid,
         max_hops: u32,
     ) -> Result<()> {
+        let routes_len = { self.routing_table.read().await.get_all_routes().len() };
+        debug!(
+            "路由请求: 目标={} hops={} 本地={} 当前路由条目={}",
+            destination, max_hops, self.local_node_id, routes_len
+        );
         // 如果目标是本地节点，直接处理
         if destination == self.local_node_id {
+            debug!("目标是本地节点，直接处理消息");
             return self.handle_local_message(message).await;
         }
         
@@ -171,12 +186,27 @@ impl MessageRouter {
             destination,
             max_hops,
         );
+        debug!(
+            "构造路由消息: route_id={} src={} dst={} max_hops={}",
+            routed_message.route_id,
+            routed_message.source_node,
+            routed_message.destination_node,
+            routed_message.max_hops
+        );
         
         self.forward_message(routed_message).await
     }
     
     /// 转发路由消息
     pub async fn forward_message(&self, mut routed_message: RoutedMessage) -> Result<()> {
+        debug!(
+            "开始转发: route_id={} src={} dst={} hop={}/{}",
+            routed_message.route_id,
+            routed_message.source_node,
+            routed_message.destination_node,
+            routed_message.hop_count,
+            routed_message.max_hops
+        );
         // 检查是否已经处理过这个消息
         if self.is_message_cached(&routed_message.route_id).await {
             debug!("消息 {} 已经处理过，跳过", routed_message.route_id);
@@ -185,6 +215,7 @@ impl MessageRouter {
         
         // 缓存消息ID
         self.cache_message_id(routed_message.route_id).await;
+        debug!("缓存消息ID: {}", routed_message.route_id);
         
         // 检查跳数限制
         if !routed_message.increment_hop() {
@@ -194,6 +225,7 @@ impl MessageRouter {
         
         // 如果目标是本地节点，处理消息
         if routed_message.destination_node == self.local_node_id {
+            debug!("转发目标解析为本地节点，交由本地处理");
             return self.handle_local_message(routed_message.original_message).await;
         }
         
@@ -202,11 +234,24 @@ impl MessageRouter {
             let routing_table = self.routing_table.read().await;
             routing_table.get_next_hop(&routed_message.destination_node)
         };
+        debug!(
+            "查找下一跳: dst={} next_hop={:?}",
+            routed_message.destination_node,
+            next_hop
+        );
         
         match next_hop {
             Some(next_hop_id) => {
                 // 找到下一跳，转发消息
                 if let Some(peer) = self.peer_manager.get_peer(&next_hop_id).await {
+                    let peer_addr = peer.read().await.addr();
+                    let peer_status_dbg = format!("{:?}", peer.read().await.status);
+                    debug!(
+                        "下一跳peer可用: id={} addr={} status={}",
+                        next_hop_id,
+                        peer_addr,
+                        peer_status_dbg
+                    );
                     let message = routed_message.to_message();
                     peer.read().await.send_message(&message).await?;
                     
@@ -243,6 +288,21 @@ impl MessageRouter {
         let mut success_count = 0;
         let mut error_count = 0;
         
+        debug!(
+            "开始广播: route_id={} 源={} 候选节点数={}",
+            routed_message.route_id,
+            routed_message.source_node,
+            peers.len()
+        );
+        for p in &peers {
+            let g = p.read().await;
+            debug!(
+                "广播候选: id={} addr={} status={:?}",
+                g.id,
+                g.addr(),
+                g.status
+            );
+        }
         for peer in peers {
             let peer_id = peer.read().await.id;
             
@@ -305,7 +365,9 @@ impl MessageRouter {
     
     /// 获取路由表快照
     pub async fn get_routing_table_snapshot(&self) -> Vec<(Uuid, Uuid, u32)> {
-        self.routing_table.read().await.get_all_routes()
+        let snapshot = self.routing_table.read().await.get_all_routes();
+        debug!("路由表快照生成，条目数: {}", snapshot.len());
+        snapshot
     }
     
     /// 检查消息是否已缓存
@@ -316,6 +378,7 @@ impl MessageRouter {
     /// 缓存消息ID
     async fn cache_message_id(&self, message_id: Uuid) {
         self.message_cache.write().await.insert(message_id, std::time::Instant::now());
+        debug!("缓存消息ID完成: {}", message_id);
     }
     
     /// 启动缓存清理任务
@@ -344,6 +407,7 @@ impl MessageRouter {
     
     /// 处理路由发现
     pub async fn handle_route_discovery(&self, source: Uuid, target: Uuid) -> Result<()> {
+        debug!("处理路由发现: source={} target={}", source, target);
         // 简单的路由发现：如果我们知道目标节点，返回路由信息
         let routing_table = self.routing_table.read().await;
         

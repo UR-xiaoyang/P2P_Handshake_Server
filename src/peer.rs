@@ -201,12 +201,25 @@ impl PeerManager {
             return Err(anyhow::anyhow!(error_msg));
         }
 
-        // 检查是否已经有相同ID的节点
-        if self.peers.read().await.contains_key(&node_info.id) {
-            let error_msg = format!("节点ID {} 已存在", node_info.id);
-            let error_response = Message::error(error_msg.clone());
-            peer.read().await.send_message(&error_response).await?;
-            return Err(anyhow::anyhow!(error_msg));
+        // 同ID重连处理：如果节点ID已存在，视为重连并替换旧映射
+        {
+            let mut peers_guard = self.peers.write().await;
+            if let Some(existing_peer) = peers_guard.get(&node_info.id).cloned() {
+                // 如果映射的是同一个Peer对象，则允许继续（可能是重复握手）
+                if !Arc::ptr_eq(&existing_peer, &peer) {
+                    let old_addr = existing_peer.read().await.addr();
+                    // 从地址索引中移除旧地址
+                    self.peers_by_addr.write().await.remove(&old_addr);
+                    // 从ID索引中移除旧Peer
+                    peers_guard.remove(&node_info.id);
+                    info!(
+                        "检测到节点ID重用，视为重连：ID={} 旧地址={} 新地址={}，替换旧映射",
+                        node_info.id,
+                        old_addr,
+                        peer_addr
+                    );
+                }
+            }
         }
 
         // 网络ID由客户端提供；如果缺失则拒绝
