@@ -13,15 +13,43 @@ permissions:
 jobs:
   linux:
     runs-on: ubuntu-latest
+    continue-on-error: ${{ matrix.experimental }}
     strategy:
       fail-fast: false
       matrix:
+        experimental: [false]
         target: [
           x86_64-unknown-linux-gnu,
+          x86_64-unknown-linux-musl,
           aarch64-unknown-linux-gnu,
+          aarch64-unknown-linux-musl,
           armv7-unknown-linux-gnueabihf,
-          i686-unknown-linux-gnu
+          i686-unknown-linux-gnu,
+          riscv64gc-unknown-linux-gnu,
+          powerpc64le-unknown-linux-gnu,
+          s390x-unknown-linux-gnu
         ]
+        include:
+          - target: aarch64-linux-android
+            experimental: true
+          - target: armv7-linux-androideabi
+            experimental: true
+          - target: loongarch64-unknown-linux-gnu
+            experimental: true
+          - target: mips-unknown-linux-gnu
+            experimental: true
+          - target: mipsel-unknown-linux-gnu
+            experimental: true
+          - target: mips64-unknown-linux-gnuabi64
+            experimental: true
+          - target: mips64el-unknown-linux-gnuabi64
+            experimental: true
+          - target: powerpc-unknown-linux-gnu
+            experimental: true
+          - target: powerpc64-unknown-linux-gnu
+            experimental: true
+          - target: riscv32gc-unknown-linux-gnu
+            experimental: true
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -34,45 +62,41 @@ jobs:
       - name: Cache Cargo
         uses: Swatinem/rust-cache@v2
 
-      - name: Install target-specific toolchains (Linux)
-        shell: bash
-        run: |
-          sudo apt-get update
-          case "${{ matrix.target }}" in
-            aarch64-unknown-linux-gnu)
-              sudo apt-get install -y gcc-aarch64-linux-gnu
-              ;;
-            armv7-unknown-linux-gnueabihf)
-              sudo apt-get install -y gcc-arm-linux-gnueabihf
-              ;;
-            i686-unknown-linux-gnu)
-              sudo apt-get install -y gcc-multilib
-              ;;
-            x86_64-unknown-linux-gnu)
-              sudo apt-get install -y build-essential
-              ;;
-            *)
-              echo "No extra packages for target=${{ matrix.target }}"
-              ;;
-          esac
+      - name: Install cross
+        run: cargo install cross
 
-      - name: Build
-        run: cargo build --release --target ${{ matrix.target }}
+      - name: Build with cross
+        run: cross build --release --target ${{ matrix.target }}
 
       - name: Package artifact
         shell: bash
         run: |
           BIN=target/${{ matrix.target }}/release/p2p_server
-          OUT=p2p_server-${{ matrix.target }}-linux
+          case "${{ matrix.target }}" in
+            *-android)
+              SUFFIX=android
+              ;;
+            *)
+              SUFFIX=linux
+              ;;
+          esac
+          OUT=p2p_server-${{ matrix.target }}-${SUFFIX}
           cp "$BIN" "$OUT"
           tar -czf "$OUT.tar.gz" "$OUT"
 
-      - name: Upload binary artifact
+      - name: Upload binary artifact (Android)
+        if: ${{ endsWith(matrix.target, 'android') }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: p2p_server-${{ matrix.target }}-android
+          path: p2p_server-${{ matrix.target }}-android.tar.gz
+
+      - name: Upload binary artifact (Linux)
+        if: ${{ !endsWith(matrix.target, 'android') }}
         uses: actions/upload-artifact@v4
         with:
           name: p2p_server-${{ matrix.target }}-linux
-          path: |
-            p2p_server-${{ matrix.target }}-linux.tar.gz
+          path: p2p_server-${{ matrix.target }}-linux.tar.gz
 
   macos:
     runs-on: macos-latest
@@ -114,14 +138,20 @@ jobs:
 
   windows:
     runs-on: windows-latest
+    continue-on-error: ${{ matrix.experimental }}
     strategy:
       fail-fast: false
       matrix:
+        experimental: [false]
         target: [
           x86_64-pc-windows-msvc,
           aarch64-pc-windows-msvc,
-          i686-pc-windows-msvc
+          i686-pc-windows-msvc,
+          x86_64-pc-windows-gnu
         ]
+        include:
+          - target: i686-pc-windows-gnu
+            experimental: true
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -133,6 +163,26 @@ jobs:
 
       - name: Cache Cargo
         uses: Swatinem/rust-cache@v2
+
+      - name: Setup MSYS2 for MinGW (GNU, x86_64)
+        if: ${{ matrix.target == 'x86_64-pc-windows-gnu' }}
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: true
+          install: >-
+            mingw-w64-x86_64-gcc
+            mingw-w64-x86_64-pkg-config
+
+      - name: Setup MSYS2 for MinGW (GNU, i686)
+        if: ${{ matrix.target == 'i686-pc-windows-gnu' }}
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW32
+          update: true
+          install: >-
+            mingw-w64-i686-gcc
+            mingw-w64-i686-pkg-config
 
       - name: Build
         run: cargo build --release --target ${{ matrix.target }}
