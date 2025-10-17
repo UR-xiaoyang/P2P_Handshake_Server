@@ -285,6 +285,18 @@ impl P2PServer {
                 info!("收到ACK消息: ack_for={:?} 来自 {}", message.ack_for, peer.read().await.addr());
                 // 处理ACK逻辑（如果需要）
             }
+            MessageType::ListNodesRequest => {
+                info!("处理列出节点请求消息，来自 {}", peer.read().await.addr());
+                let all_peers = self.peer_manager.get_all_peers().await;
+                let mut all_peers_info = Vec::new();
+                for p in all_peers {
+                    if let Some(node_info) = &p.read().await.node_info {
+                        all_peers_info.push(node_info.clone());
+                    }
+                }
+                let response = Message::list_nodes_response(all_peers_info);
+                peer.read().await.send_message(&response).await?;
+            }
             MessageType::Error => {
                 warn!("收到错误消息: {:?} 来自 {}", message.payload, peer.read().await.addr());
             }

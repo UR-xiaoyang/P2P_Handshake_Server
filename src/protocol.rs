@@ -17,6 +17,10 @@ pub enum MessageType {
     DiscoveryRequest,
     /// 节点发现响应
     DiscoveryResponse,
+    /// 请求节点列表
+    ListNodesRequest,
+    /// 响应节点列表
+    ListNodesResponse,
     /// 数据传输
     Data,
     /// 错误消息
@@ -141,6 +145,16 @@ impl Message {
         let payload = serde_json::json!({ "reason": reason });
         Self::new(MessageType::Disconnect, payload)
     }
+
+    pub fn list_nodes_request() -> Self {
+        Self::new(MessageType::ListNodesRequest, serde_json::Value::Null)
+    }
+
+    pub fn list_nodes_response(nodes: Vec<NodeInfo>) -> Self {
+        let response = ListNodesResponse { nodes };
+        let payload = serde_json::to_value(response).unwrap();
+        Self::new(MessageType::ListNodesResponse, payload)
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -187,6 +201,11 @@ pub struct HandshakeResponse {
     pub node_info: NodeInfo,
     pub success: bool,
     pub error_message: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ListNodesResponse {
+    pub nodes: Vec<NodeInfo>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
