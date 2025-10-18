@@ -21,3 +21,9 @@ ar = "mips-linux-gnu-ar"
 [target.loongarch64-unknown-linux-gnu]
 linker = "loongarch64-unknown-linux-gnu-gcc"
 ar = "loongarch64-unknown-linux-gnu-ar"
+
+[target.aarch64-linux-android]
+rustflags = ["-Z", "build-std=std,panic_abort"]
+
+[target.armv7-linux-androideabi]
+rustflags = ["-Z", "build-std=std,panic_abort"]

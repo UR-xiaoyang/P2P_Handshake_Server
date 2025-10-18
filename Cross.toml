@@ -1,9 +1,3 @@
 [target.loongarch64-unknown-linux-gnu]
 # Use a cross image that includes LoongArch toolchains
 image = "messense/cross:loongarch64-unknown-linux-gnu"
-
-[target.aarch64-linux-android]
-build-std = ["std", "panic_abort"]
-
-[target.armv7-linux-androideabi]
-build-std = ["std", "panic_abort"]
