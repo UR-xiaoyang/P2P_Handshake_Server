@@ -92,6 +92,9 @@ jobs:
 
       - name: Build with cross (构建 - 使用 cross)
         if: ${{ matrix.target != 'loongarch64-unknown-linux-gnu' }}
+        env:
+          CARGO_TARGET_AARCH64_LINUX_ANDROID_RUSTFLAGS: "-Z build-std=std,panic_abort"
+          CARGO_TARGET_ARMV7_LINUX_ANDROIDEABI_RUSTFLAGS: "-Z build-std=std,panic_abort"
         run: |
           if [ "${{ matrix.target }}" == "i686-unknown-linux-gnu" ]; then
             export CARGO_TARGET_I686_UNKNOWN_LINUX_GNU_LINKER=i686-linux-gnu-gcc
