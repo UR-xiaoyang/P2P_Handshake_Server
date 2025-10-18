@@ -154,13 +154,40 @@ jobs:
           curl -L -o /tmp/$ASSET "$URL"
           mkdir -p /opt/loongarch64-toolchain
           tar -xJf /tmp/$ASSET -C /opt/loongarch64-toolchain --strip-components=1
-          echo "/opt/loongarch64-toolchain/cross-tools/bin" >> $GITHUB_PATH
-          echo "CC_loongarch64_unknown_linux_gnu=/opt/loongarch64-toolchain/cross-tools/bin/loongarch64-unknown-linux-gnu-gcc" >> $GITHUB_ENV
-          echo "CXX_loongarch64_unknown_linux_gnu=/opt/loongarch64-toolchain/cross-tools/bin/loongarch64-unknown-linux-gnu-g++" >> $GITHUB_ENV
-          echo "AR_loongarch64_unknown_linux_gnu=/opt/loongarch64-toolchain/cross-tools/bin/loongarch64-unknown-linux-gnu-ar" >> $GITHUB_ENV
-          echo "RANLIB_loongarch64_unknown_linux_gnu=/opt/loongarch64-toolchain/cross-tools/bin/loongarch64-unknown-linux-gnu-ranlib" >> $GITHUB_ENV
-          echo "CARGO_TARGET_LOONGARCH64_UNKNOWN_LINUX_GNU_LINKER=/opt/loongarch64-toolchain/cross-tools/bin/loongarch64-unknown-linux-gnu-gcc" >> $GITHUB_ENV
-          /opt/loongarch64-toolchain/cross-tools/bin/loongarch64-unknown-linux-gnu-gcc --version
+          echo "提取后的目录结构:"; ls -la /opt/loongarch64-toolchain || true; ls -la /opt/loongarch64-toolchain/cross-tools || true; ls -la /opt/loongarch64-toolchain/cross-tools/bin || true
+          # 自动探测 gcc 路径（兼容 unknown/linux 前缀 & 根/bin 或 cross-tools/bin 布局）
+          CC_PATH=""
+          for c in \
+            "/opt/loongarch64-toolchain/cross-tools/bin/loongarch64-unknown-linux-gnu-gcc" \
+            "/opt/loongarch64-toolchain/cross-tools/bin/loongarch64-linux-gnu-gcc" \
+            "/opt/loongarch64-toolchain/bin/loongarch64-unknown-linux-gnu-gcc" \
+            "/opt/loongarch64-toolchain/bin/loongarch64-linux-gnu-gcc"; do
+            if [ -x "$c" ]; then CC_PATH="$c"; break; fi
+          done
+          if [ -z "$CC_PATH" ]; then
+            CC_PATH=$(find /opt/loongarch64-toolchain -maxdepth 4 -type f -name 'loongarch64*-linux-gnu-gcc' | head -n1 || true)
+          fi
+          if [ -z "$CC_PATH" ]; then
+            echo "未找到 loongarch64 gcc，可疑的目录结构如下："; ls -R /opt/loongarch64-toolchain; exit 1
+          fi
+          TOOLCHAIN_BIN=$(dirname "$CC_PATH")
+          PREFIX=$(basename "$CC_PATH" | sed 's/-gcc$//')
+          CXX_PATH="$TOOLCHAIN_BIN/${PREFIX}-g++"
+          AR_PATH="$TOOLCHAIN_BIN/${PREFIX}-ar"
+          RANLIB_PATH="$TOOLCHAIN_BIN/${PREFIX}-ranlib"
+          # 可能只有 gcc-ar / gcc-ranlib，做兼容回退
+          if [ ! -x "$AR_PATH" ] && [ -x "$TOOLCHAIN_BIN/${PREFIX}-gcc-ar" ]; then AR_PATH="$TOOLCHAIN_BIN/${PREFIX}-gcc-ar"; fi
+          if [ ! -x "$RANLIB_PATH" ] && [ -x "$TOOLCHAIN_BIN/${PREFIX}-gcc-ranlib" ]; then RANLIB_PATH="$TOOLCHAIN_BIN/${PREFIX}-gcc-ranlib"; fi
+          echo "$TOOLCHAIN_BIN" >> $GITHUB_PATH
+          echo "Using toolchain bin: $TOOLCHAIN_BIN"
+          echo "Using toolchain prefix: $PREFIX"
+          # 为 Rust/Cargo 与 cc crate 设置目标专用变量
+          echo "CARGO_TARGET_LOONGARCH64_UNKNOWN_LINUX_GNU_LINKER=$CC_PATH" >> $GITHUB_ENV
+          echo "CC_loongarch64_unknown_linux_gnu=$CC_PATH" >> $GITHUB_ENV
+          echo "CXX_loongarch64_unknown_linux_gnu=$CXX_PATH" >> $GITHUB_ENV
+          echo "AR_loongarch64_unknown_linux_gnu=$AR_PATH" >> $GITHUB_ENV
+          echo "RANLIB_loongarch64_unknown_linux_gnu=$RANLIB_PATH" >> $GITHUB_ENV
+          "$CC_PATH" --version
 
       - name: Build (cargo)
         run: cargo build --release --target ${{ matrix.target }}
