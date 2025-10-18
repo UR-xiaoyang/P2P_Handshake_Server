@@ -31,12 +31,6 @@ jobs:
           s390x-unknown-linux-gnu
         ]
         include:
-          - target: aarch64-linux-android
-            experimental: true
-            toolchain: nightly
-          - target: armv7-linux-androideabi
-            experimental: true
-            toolchain: nightly
           # removed loongarch64 from ubuntu matrix; handled in fedora container job
           - target: powerpc-unknown-linux-gnu
             experimental: true
