@@ -293,8 +293,13 @@ jobs:
           msystem: MINGW32
           update: true
           install: >-
-            mingw-w64-i686-gcc
+            mingw-w64-i686-toolchain
             mingw-w64-i686-pkg-config
+      - name: Configure GNU i686 linker
+        if: ${{ matrix.target == 'i686-pc-windows-gnu' }}
+        shell: pwsh
+        run: |
+          "CARGO_TARGET_I686_PC_WINDOWS_GNU_LINKER=i686-w64-mingw32-gcc" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
 
       - name: Build
         run: cargo build --release --target ${{ matrix.target }}
