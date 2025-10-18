@@ -34,8 +34,10 @@ jobs:
         include:
           - target: aarch64-linux-android
             experimental: true
+            toolchain: nightly
           - target: armv7-linux-androideabi
             experimental: true
+            toolchain: nightly
           # removed loongarch64 from ubuntu matrix; handled in fedora container job
           - target: powerpc-unknown-linux-gnu
             experimental: true
@@ -43,7 +45,6 @@ jobs:
             experimental: true
           - target: riscv32gc-unknown-linux-gnu
             experimental: true
-            toolchain: nightly
     steps:
       - name: Checkout (签出代码)
         uses: actions/checkout@v4
