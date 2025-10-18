@@ -90,9 +90,6 @@ jobs:
           CARGO_TARGET_AARCH64_LINUX_ANDROID_RUSTFLAGS: "-Z build-std=std,panic_abort"
           CARGO_TARGET_ARMV7_LINUX_ANDROIDEABI_RUSTFLAGS: "-Z build-std=std,panic_abort"
         run: |
-          if [ "${{ matrix.target }}" == "i686-unknown-linux-gnu" ]; then
-            export CARGO_TARGET_I686_UNKNOWN_LINUX_GNU_LINKER=i686-linux-gnu-gcc
-          fi
           cross build --release --target ${{ matrix.target }}
 
       - name: Package artifact (打包构建产物)
