@@ -301,7 +301,12 @@ jobs:
         run: |
           "CARGO_TARGET_I686_PC_WINDOWS_GNU_LINKER=i686-w64-mingw32-gcc" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
 
-      - name: Build
+      - name: Build (GNU via MSYS2 shell)
+        if: ${{ endsWith(matrix.target, '-gnu') }}
+        shell: msys2 {0}
+        run: cargo build --release --target ${{ matrix.target }}
+      - name: Build (non-GNU)
+        if: ${{ !endsWith(matrix.target, '-gnu') }}
         run: cargo build --release --target ${{ matrix.target }}
 
       - name: Package artifact
