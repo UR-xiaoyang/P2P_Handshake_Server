@@ -304,7 +304,9 @@ jobs:
       - name: Build (GNU via MSYS2 shell)
         if: ${{ endsWith(matrix.target, '-gnu') }}
         shell: msys2 {0}
-        run: cargo build --release --target ${{ matrix.target }}
+        run: |
+          export PATH="$HOME/.cargo/bin:$PATH"
+          cargo build --release --target ${{ matrix.target }}
       - name: Build (non-GNU)
         if: ${{ !endsWith(matrix.target, '-gnu') }}
         run: cargo build --release --target ${{ matrix.target }}
