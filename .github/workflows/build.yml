@@ -258,12 +258,8 @@ jobs:
         target: [
           x86_64-pc-windows-msvc,
           aarch64-pc-windows-msvc,
-          i686-pc-windows-msvc,
-          x86_64-pc-windows-gnu
+          i686-pc-windows-msvc
         ]
-        include:
-          - target: i686-pc-windows-gnu
-            experimental: true
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -276,39 +272,7 @@ jobs:
       - name: Cache Cargo
         uses: Swatinem/rust-cache@v2
 
-      - name: Setup MSYS2 for MinGW (GNU, x86_64)
-        if: ${{ matrix.target == 'x86_64-pc-windows-gnu' }}
-        uses: msys2/setup-msys2@v2
-        with:
-          msystem: MINGW64
-          update: true
-          install: >-
-            mingw-w64-x86_64-gcc
-            mingw-w64-x86_64-pkg-config
-
-      - name: Setup MSYS2 for MinGW (GNU, i686)
-        if: ${{ matrix.target == 'i686-pc-windows-gnu' }}
-        uses: msys2/setup-msys2@v2
-        with:
-          msystem: MINGW32
-          update: true
-          install: >-
-            mingw-w64-i686-toolchain
-            mingw-w64-i686-pkg-config
-      - name: Configure GNU i686 linker
-        if: ${{ matrix.target == 'i686-pc-windows-gnu' }}
-        shell: pwsh
-        run: |
-          "CARGO_TARGET_I686_PC_WINDOWS_GNU_LINKER=i686-w64-mingw32-gcc" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
-
-      - name: Build (GNU via MSYS2 shell)
-        if: ${{ endsWith(matrix.target, '-gnu') }}
-        shell: msys2 {0}
-        run: |
-          export PATH="$HOME/.cargo/bin:$PATH"
-          cargo build --release --target ${{ matrix.target }}
-      - name: Build (non-GNU)
-        if: ${{ !endsWith(matrix.target, '-gnu') }}
+      - name: Build
         run: cargo build --release --target ${{ matrix.target }}
 
       - name: Package artifact
