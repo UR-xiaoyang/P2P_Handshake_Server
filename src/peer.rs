@@ -414,14 +414,29 @@ impl PeerManager {
     }
     
     /// 清理断开的连接
-    pub async fn cleanup_disconnected_peers(&self) {
+    pub async fn cleanup_disconnected_peers(&self, timeout_secs: u64) {
         let mut to_remove = Vec::new();
         
         {
             let peers = self.peers.read().await;
             for (id, peer) in peers.iter() {
-                let peer_guard = peer.read().await;
-                if !peer_guard.is_connected() {
+                let pg = peer.read().await;
+
+                // 1) 非连接状态（Disconnected/Error/未握手完成）直接移除
+                let mut should_remove = !pg.is_connected();
+
+                // 2) 仍为已认证但超时未响应（last_ping 过期或从未收到过）也移除
+                if !should_remove && pg.is_authenticated() {
+                    let stale = match pg.last_ping {
+                        Some(ts) => ts.elapsed().as_secs() > timeout_secs,
+                        None => pg.created_at.elapsed().as_secs() > timeout_secs,
+                    };
+                    if stale {
+                        should_remove = true;
+                    }
+                }
+
+                if should_remove {
                     to_remove.push(*id);
                 }
             }

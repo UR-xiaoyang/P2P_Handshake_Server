@@ -354,16 +354,23 @@ impl P2PServer {
             }
             MessageType::ListNodesRequest => {
                 info!("处理列出节点请求消息，来自 {}", peer.read().await.addr());
-                let all_peers = self.peer_manager.get_all_peers().await;
-                let mut all_peers_info = Vec::new();
-                for p in all_peers {
+                let peers = self.peer_manager.get_authenticated_peers().await;
+                let mut peers_info = Vec::new();
+                let timeout = self.config.connection_timeout;
+                for p in peers {
                     let p_read = p.read().await;
+                    // 过滤超时未响应的节点
+                    let stale = match p_read.last_ping {
+                        Some(ts) => ts.elapsed().as_secs() > timeout,
+                        None => p_read.created_at.elapsed().as_secs() > timeout,
+                    };
+                    if stale { continue; }
                     if let Some(mut node_info) = p_read.node_info.clone() {
                         node_info.listen_addr = p_read.addr();
-                        all_peers_info.push(node_info);
+                        peers_info.push(node_info);
                     }
                 }
-                let response = Message::list_nodes_response(all_peers_info);
+                let response = Message::list_nodes_response(peers_info);
                 peer.read().await.send_message(&response).await?;
             }
             MessageType::Error => {
@@ -539,6 +546,7 @@ impl P2PServer {
     fn start_heartbeat_task(&self) -> tokio::task::JoinHandle<()> {
         let peer_manager = self.peer_manager.clone();
         let heartbeat_interval = self.config.heartbeat_interval;
+        let timeout = self.config.connection_timeout;
         
         tokio::spawn(async move {
             let mut interval = interval(Duration::from_secs(heartbeat_interval));
@@ -549,13 +557,33 @@ impl P2PServer {
                 let peers = peer_manager.get_authenticated_peers().await;
                 let peer_count = peers.len();
                 
-                for peer in peers {
+                // 1) 发送心跳
+                for peer in &peers {
                     let ping_message = Message::ping();
                     if let Err(e) = peer.read().await.send_message(&ping_message).await {
                         warn!("发送心跳失败: {}", e);
                         peer.write().await.update_status(PeerStatus::Error(e.to_string()));
                     }
                 }
+                
+                // 2) 移除长期未响应的节点（基于 last_ping/created_at 与 timeout）
+                let mut to_remove = Vec::new();
+                for peer in &peers {
+                    let pg = peer.read().await;
+                    let stale = match pg.last_ping {
+                        Some(ts) => ts.elapsed().as_secs() > timeout,
+                        None => pg.created_at.elapsed().as_secs() > timeout,
+                    };
+                    if stale {
+                        to_remove.push(pg.id);
+                    }
+                }
+                for id in to_remove {
+                    peer_manager.remove_peer(&id).await;
+                }
+                
+                // 3) 广播最新节点列表（去抖由专用函数处理；这里仅在心跳清理时触发一次即时广播）
+                let _ = peer_manager.broadcast_peer_list(None).await;
                 
                 debug!("发送心跳给 {} 个节点", peer_count);
             }
@@ -564,13 +592,16 @@ impl P2PServer {
     
     fn start_cleanup_task(&self) -> tokio::task::JoinHandle<()> {
         let peer_manager = self.peer_manager.clone();
+        let timeout = self.config.connection_timeout;
         
         tokio::spawn(async move {
             let mut interval = interval(Duration::from_secs(60)); // 每分钟清理一次
             
             loop {
                 interval.tick().await;
-                peer_manager.cleanup_disconnected_peers().await;
+                peer_manager.cleanup_disconnected_peers(timeout).await;
+                // 清理后广播当前列表
+                let _ = peer_manager.broadcast_peer_list(None).await;
                 debug!("执行对等节点清理任务");
             }
         })
