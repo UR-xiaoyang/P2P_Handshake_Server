@@ -31,6 +31,8 @@ pub enum MessageType {
     Ack,
     /// 重传请求
     Retransmit,
+    /// P2P 直连指令（NAT 打洞）
+    P2PConnect,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -157,6 +159,12 @@ impl Message {
         let response = ListNodesResponse { nodes };
         let payload = serde_json::to_value(response).unwrap();
         Self::new(MessageType::ListNodesResponse, payload)
+    }
+
+    /// 发起 P2P 直连请求（由服务器协调打洞）
+    pub fn initiate_p2p(peer_id: Uuid) -> Self {
+        let payload = serde_json::json!({ "peer_id": peer_id.to_string() });
+        Self::new(MessageType::P2PConnect, payload)
     }
 }
 

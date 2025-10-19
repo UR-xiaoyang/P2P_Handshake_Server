@@ -266,6 +266,64 @@ impl P2PServer {
                     warn!("解析节点发现响应失败");
                 }
             }
+            MessageType::P2PConnect => {
+                info!("处理 P2P 直连协调请求，来自 {}", peer.read().await.addr());
+                let target_id = message
+                    .payload
+                    .get("peer_id")
+                    .and_then(|v| v.as_str())
+                    .and_then(|s| uuid::Uuid::parse_str(s).ok());
+
+                if let Some(target_id) = target_id {
+                    let requester_id = peer.read().await.id;
+                    if requester_id == target_id {
+                        let err = Message::error("不能与自身建立直连".to_string());
+                        peer.read().await.send_message(&err).await?;
+                    } else if let Some(target_peer) = self.peer_manager.get_peer(&target_id).await {
+                        if !target_peer.read().await.is_authenticated() {
+                            let err = Message::error(format!("目标节点未认证: {}", target_id));
+                            peer.read().await.send_message(&err).await?;
+                        } else {
+                            let requester_addr = peer.read().await.addr();
+                            let target_addr = target_peer.read().await.addr();
+
+                            // 通知请求方目标的直连信息
+                            let msg_to_requester = Message::new(
+                                MessageType::P2PConnect,
+                                serde_json::json!({
+                                    "peer_id": target_id.to_string(),
+                                    "peer_addr": target_addr.to_string()
+                                }),
+                            );
+                            peer.read().await.send_message(&msg_to_requester).await?;
+
+                            // 通知目标方请求方的直连信息
+                            let msg_to_target = Message::new(
+                                MessageType::P2PConnect,
+                                serde_json::json!({
+                                    "peer_id": requester_id.to_string(),
+                                    "peer_addr": requester_addr.to_string()
+                                }),
+                            );
+                            target_peer.read().await.send_message(&msg_to_target).await?;
+
+                            debug!(
+                                "P2P 直连协调成功: requester={}({}), target={}({})",
+                                requester_id,
+                                requester_addr,
+                                target_id,
+                                target_addr
+                            );
+                        }
+                    } else {
+                        let err = Message::error(format!("目标节点未找到或不可达: {}", target_id));
+                        peer.read().await.send_message(&err).await?;
+                    }
+                } else {
+                    let err = Message::error("缺少或无效的 peer_id".to_string());
+                    peer.read().await.send_message(&err).await?;
+                }
+            }
             MessageType::Data => {
                 info!("收到数据消息，来自 {}", peer.read().await.addr());
                 // 尝试作为路由消息处理
@@ -299,8 +357,10 @@ impl P2PServer {
                 let all_peers = self.peer_manager.get_all_peers().await;
                 let mut all_peers_info = Vec::new();
                 for p in all_peers {
-                    if let Some(node_info) = &p.read().await.node_info {
-                        all_peers_info.push(node_info.clone());
+                    let p_read = p.read().await;
+                    if let Some(mut node_info) = p_read.node_info.clone() {
+                        node_info.listen_addr = p_read.addr();
+                        all_peers_info.push(node_info);
                     }
                 }
                 let response = Message::list_nodes_response(all_peers_info);

@@ -360,7 +360,7 @@ impl PeerManager {
             if let Some(node_info) = &peer_guard.node_info {
                 let peer_info = PeerInfo::new(
                     node_info.id,
-                    node_info.listen_addr,
+                    peer_guard.addr(),
                     node_info.capabilities.clone(),
                 );
                 peer_infos.push(peer_info);
@@ -383,7 +383,7 @@ impl PeerManager {
                 }
                 let peer_info = PeerInfo::new(
                     node_info.id,
-                    node_info.listen_addr,
+                    peer_guard.addr(),
                     node_info.capabilities.clone(),
                 );
                 peer_infos.push(peer_info);
