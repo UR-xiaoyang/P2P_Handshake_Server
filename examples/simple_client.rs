@@ -2,8 +2,10 @@ use anyhow::Result;
 use tokio::net::UdpSocket;
 use tokio::time::{timeout, Duration};
 use std::net::SocketAddr;
+use std::collections::HashMap;
 use std::env;
 use std::sync::Arc;
+use tokio::sync::Mutex;
 use uuid::Uuid;
 
 use p2p_handshake_server::protocol::{Message, MessageType, HandshakeResponse, NodeInfo, ListNodesResponse, PeerInfo};
@@ -43,9 +45,14 @@ async fn main() -> Result<()> {
     println!("握手成功! 你的 Node ID 是: {}", own_node_id);
     println!("公网地址可能为: (请查看服务器日志确认)");
 
+    // 用于存储对等节点信息
+    let peers = Arc::new(Mutex::new(HashMap::<Uuid, PeerInfo>::new()));
+    let p2p_peers = Arc::new(Mutex::new(HashMap::<Uuid, SocketAddr>::new()));
 
     // 启动消息接收任务
     let recv_socket = socket.clone();
+    let peers_clone = peers.clone();
+    let p2p_peers_clone = p2p_peers.clone();
     tokio::spawn(async move {
         loop {
             if let Some(msg) = receive_message(&recv_socket).await.unwrap_or(None) {
@@ -60,10 +67,12 @@ async fn main() -> Result<()> {
                         }
                     },
                     MessageType::DiscoveryResponse => {
-                        if let Ok(peers) = serde_json::from_value::<Vec<PeerInfo>>(msg.payload) {
+                        if let Ok(peers_data) = serde_json::from_value::<Vec<PeerInfo>>(msg.payload) {
                             println!("--- 发现节点列表 (自动下发) ---");
-                            for peer in peers {
+                            let mut peers_map = peers_clone.lock().await;
+                            for peer in peers_data {
                                 println!("- ID: {}, 地址: {}", peer.id, peer.addr);
+                                peers_map.insert(peer.id, peer);
                             }
                             println!("---------------------------");
                         } else {
@@ -73,17 +82,56 @@ async fn main() -> Result<()> {
                     MessageType::ListNodesResponse => {
                         if let Ok(list_response) = serde_json::from_value::<ListNodesResponse>(msg.payload) {
                             println!("--- 在线节点列表 (手动刷新) ---");
+                            let mut peers_map = peers_clone.lock().await;
                             for node in list_response.nodes {
                                 println!("- ID: {}, 名称: {}, 地址: {}", node.id, node.name, node.listen_addr);
+                                let peer_info = PeerInfo {
+                                    id: node.id,
+                                    addr: node.listen_addr,
+                                    last_seen: 0,
+                                    capabilities: node.capabilities,
+                                };
+                                peers_map.insert(node.id, peer_info);
                             }
                             println!("---------------------");
                         } else {
                             println!("无法解析节点列表响应");
                         }
                     },
-                    MessageType::Ack => {
-                        // 可以选择忽略或处理Ack
+                     MessageType::P2PConnect => {
+                        if let (Some(peer_addr), Some(peer_id)) = (
+                            msg.payload.get("peer_addr").and_then(|v| v.as_str()).and_then(|s| s.parse::<SocketAddr>().ok()),
+                            msg.payload.get("peer_id").and_then(|v| v.as_str()).and_then(|s| Uuid::parse_str(s).ok())
+                        ) {
+                            println!("收到 P2P 连接指令，目标地址: {}，目标ID: {}", peer_addr, peer_id);
+                            let mut p2p_peers_map = p2p_peers_clone.lock().await;
+                            p2p_peers_map.insert(peer_id, peer_addr);
+
+                            // Send a punch-through packet
+                            let punch_msg = Message::ping();
+                            let recv_socket_clone = recv_socket.clone();
+                            tokio::spawn(async move {
+                                if let Err(e) = send_message(&recv_socket_clone, &punch_msg, peer_addr).await {
+                                    println!("打洞失败: {}", e);
+                                }
+                            });
+                        }
                     },
+                     MessageType::Ack => {
+                         // 可以选择忽略或处理Ack
+                    },
+                    MessageType::Ping => {
+                        // 收到Ping，回复Pong
+                        if let Some(addr) = msg.sender_addr {
+                            let pong = Message::new(MessageType::Pong, serde_json::Value::Null);
+                            let recv_socket_clone = recv_socket.clone();
+                            tokio::spawn(async move {
+                                if let Err(e) = send_message(&recv_socket_clone, &pong, addr).await {
+                                    println!("回复 Pong 失败: {}", e);
+                                }
+                            });
+                        }
+                    }
                     _ => {
                          println!("
 收到未处理消息: {:?}", msg);
@@ -93,9 +141,8 @@ async fn main() -> Result<()> {
         }
     });
 
-    println!("
-进入交互模式. 输入 'exit' 退出.");
-    println!("发送消息格式: <目标Node_ID> <消息内容>");
+     println!("\n进入交互模式. 输入 'exit' 退出.");
+     println!("发送消息格式: <目标Node_ID> <消息内容>");
     println!("查看在线节点: list");
 
     // 交互式发送消息
@@ -120,10 +167,34 @@ async fn main() -> Result<()> {
         if parts.len() == 2 {
             if let Ok(dest_id) = Uuid::parse_str(parts[0]) {
                 let content = parts[1];
-                let original = Message::data(serde_json::json!({"text": content}));
-                let routed = RoutedMessage::new(original, own_node_id, dest_id, 8).to_message();
-                if let Err(e) = send_message(&socket, &routed, server_addr).await {
-                    println!("发送失败: {}", e);
+
+                let p2p_addr = p2p_peers.lock().await.get(&dest_id).cloned();
+
+                if p2p_addr.is_none() {
+                    // Initiate P2P connection
+                    let p2p_req = Message::initiate_p2p(dest_id);
+                    if let Err(e) = send_message(&socket, &p2p_req, server_addr).await {
+                        println!("发送 P2P 请求失败: {}", e);
+                    }
+                }
+
+                 let original = Message::data(serde_json::json!({"text": content}));
+                 let routed = RoutedMessage::new(original, own_node_id, dest_id, 8).to_message();
+
+                 let target_addr = if let Some(addr) = p2p_addr {
+                    addr
+                 } else {
+                    let peers_map = peers.lock().await;
+                    if let Some(peer) = peers_map.get(&dest_id) {
+                        peer.addr
+                    } else {
+                        // 如果在本地找不到，则通过服务器转发
+                        server_addr
+                    }
+                 };
+
+                 if let Err(e) = send_message(&socket, &routed, target_addr).await {
+                     println!("发送失败: {}", e);
                 } else {
                     println!("消息已发送 -> {}", dest_id);
                 }
@@ -206,9 +277,10 @@ async fn send_message(socket: &UdpSocket, message: &Message, target: SocketAddr)
 async fn receive_message(socket: &UdpSocket) -> Result<Option<Message>> {
     let mut buffer = vec![0u8; 65536];
     match timeout(Duration::from_secs(3600), socket.recv_from(&mut buffer)).await { // 延长超时以便持续接收
-        Ok(Ok((len, _addr))) => {
+        Ok(Ok((len, addr))) => {
             buffer.truncate(len);
-            let message: Message = serde_json::from_slice(&buffer)?;
+            let mut message: Message = serde_json::from_slice(&buffer)?;
+            message.sender_addr = Some(addr);
             Ok(Some(message))
         }
         Ok(Err(e)) => Err(e.into()),
