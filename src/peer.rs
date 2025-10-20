@@ -424,12 +424,33 @@ impl PeerManager {
 
                 // 1) 非连接状态（Disconnected/Error/未握手完成）直接移除
                 let mut should_remove = !pg.is_connected();
+                let mut removal_reason = String::new();
+
+                if should_remove {
+                    removal_reason = format!("状态异常: {:?}", pg.status);
+                }
 
                 // 2) 仍为已认证但超时未响应（last_ping 过期或从未收到过）也移除
                 if !should_remove && pg.is_authenticated() {
                     let stale = match pg.last_ping {
-                        Some(ts) => ts.elapsed().as_secs() > timeout_secs,
-                        None => pg.created_at.elapsed().as_secs() > timeout_secs,
+                        Some(ts) => {
+                            let elapsed = ts.elapsed().as_secs();
+                            if elapsed > timeout_secs {
+                                removal_reason = format!("心跳超时: {}秒未响应 (超时阈值: {}秒)", elapsed, timeout_secs);
+                                true
+                            } else {
+                                false
+                            }
+                        },
+                        None => {
+                            let elapsed = pg.created_at.elapsed().as_secs();
+                            if elapsed > timeout_secs {
+                                removal_reason = format!("从未响应心跳: 连接{}秒未收到任何pong (超时阈值: {}秒)", elapsed, timeout_secs);
+                                true
+                            } else {
+                                false
+                            }
+                        },
                     };
                     if stale {
                         should_remove = true;
@@ -437,12 +458,13 @@ impl PeerManager {
                 }
 
                 if should_remove {
-                    to_remove.push(*id);
+                    to_remove.push((*id, pg.addr(), removal_reason));
                 }
             }
         }
         
-        for id in to_remove {
+        for (id, addr, reason) in to_remove {
+            info!("清理节点 {} ({}): {}", id, addr, reason);
             self.remove_peer(&id).await;
         }
     }

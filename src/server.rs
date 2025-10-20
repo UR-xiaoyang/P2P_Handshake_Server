@@ -554,11 +554,35 @@ impl P2PServer {
             loop {
                 interval.tick().await;
                 
+                // 1) 首先清理长期未响应的节点（在发送新的ping之前）
                 let peers = peer_manager.get_authenticated_peers().await;
-                let peer_count = peers.len();
+                let mut to_remove = Vec::new();
+                let mut active_peers = Vec::new();
                 
-                // 1) 发送心跳
-                for peer in &peers {
+                for peer in peers {
+                    let pg = peer.read().await;
+                    let stale = match pg.last_ping {
+                        Some(ts) => ts.elapsed().as_secs() > timeout,
+                        None => pg.created_at.elapsed().as_secs() > timeout,
+                    };
+                    
+                    if stale {
+                        to_remove.push(pg.id);
+                        info!("节点 {} ({}) 超时未响应，将被移除", pg.id, pg.addr());
+                    } else {
+                        active_peers.push(peer.clone());
+                    }
+                }
+                
+                // 移除超时节点
+                let removed_count = to_remove.len();
+                for id in to_remove {
+                    peer_manager.remove_peer(&id).await;
+                }
+                
+                // 2) 向活跃节点发送心跳
+                let peer_count = active_peers.len();
+                for peer in &active_peers {
                     let ping_message = Message::ping();
                     if let Err(e) = peer.read().await.send_message(&ping_message).await {
                         warn!("发送心跳失败: {}", e);
@@ -566,26 +590,12 @@ impl P2PServer {
                     }
                 }
                 
-                // 2) 移除长期未响应的节点（基于 last_ping/created_at 与 timeout）
-                let mut to_remove = Vec::new();
-                for peer in &peers {
-                    let pg = peer.read().await;
-                    let stale = match pg.last_ping {
-                        Some(ts) => ts.elapsed().as_secs() > timeout,
-                        None => pg.created_at.elapsed().as_secs() > timeout,
-                    };
-                    if stale {
-                        to_remove.push(pg.id);
-                    }
-                }
-                for id in to_remove {
-                    peer_manager.remove_peer(&id).await;
+                // 3) 如果有节点被移除，广播最新节点列表
+                if removed_count > 0 {
+                    let _ = peer_manager.broadcast_peer_list(None).await;
                 }
                 
-                // 3) 广播最新节点列表（去抖由专用函数处理；这里仅在心跳清理时触发一次即时广播）
-                let _ = peer_manager.broadcast_peer_list(None).await;
-                
-                debug!("发送心跳给 {} 个节点", peer_count);
+                debug!("发送心跳给 {} 个节点，移除 {} 个超时节点", peer_count, removed_count);
             }
         })
     }
@@ -595,14 +605,24 @@ impl P2PServer {
         let timeout = self.config.connection_timeout;
         
         tokio::spawn(async move {
-            let mut interval = interval(Duration::from_secs(60)); // 每分钟清理一次
+            let mut interval = interval(Duration::from_secs(30)); // 每30秒清理一次，更频繁
             
             loop {
                 interval.tick().await;
+                
+                let before_count = peer_manager.get_authenticated_peers().await.len();
                 peer_manager.cleanup_disconnected_peers(timeout).await;
-                // 清理后广播当前列表
-                let _ = peer_manager.broadcast_peer_list(None).await;
-                debug!("执行对等节点清理任务");
+                let after_count = peer_manager.get_authenticated_peers().await.len();
+                
+                let cleaned_count = before_count.saturating_sub(after_count);
+                
+                // 只有在清理了节点时才广播和记录日志
+                if cleaned_count > 0 {
+                    let _ = peer_manager.broadcast_peer_list(None).await;
+                    info!("清理任务完成：移除了 {} 个断开的节点，当前活跃节点数: {}", cleaned_count, after_count);
+                } else {
+                    debug!("清理任务完成：无需清理节点，当前活跃节点数: {}", after_count);
+                }
             }
         })
     }
