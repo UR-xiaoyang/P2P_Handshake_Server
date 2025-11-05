@@ -31,6 +31,9 @@ pub mod peer;
 pub mod protocol;
 pub mod router;
 pub mod server;
+pub mod stun_server;
+pub mod stun_protocol;
+
 
 // 重新导出主要的公共API
 pub use config::Config;
@@ -39,3 +42,5 @@ pub use protocol::{Message, MessageType, NodeInfo};
 pub use peer::{Peer, PeerManager, PeerStatus};
 pub use network::{Connection, NetworkManager};
 pub use router::{MessageRouter, RoutedMessage, RoutingTable};
+pub use stun_server::{StunServer, StunServerConfig, StunServerStats};
+pub use stun_protocol::{is_stun_packet, extract_transaction_id};

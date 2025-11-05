@@ -5,5 +5,17 @@
   "connection_timeout": 60,
   "discovery_port_range": [8081, 8090],
   "enable_discovery": true,
-  "network_id": "test"
+  "network_id": "test",
+  "ice": {
+    "enable": true,
+    "stun_servers": [
+      "stun.l.google.com:19302",
+      "stun1.l.google.com:19302"
+    ],
+    "gathering_timeout": 5000,
+    "connectivity_check_timeout": 30000,
+    "max_candidates": 10,
+    "stun_retry_count": 3,
+    "stun_timeout": 5000
+  }
 }

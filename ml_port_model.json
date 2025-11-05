@@ -1,0 +1,60 @@
+{
+  "model": {
+    "weights": [
+      8414.687315355157,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      8414.687315355157,
+      8414.687315355157,
+      0.0,
+      5376.120278919759,
+      1203.1800502328642,
+      4750.749893670065,
+      7.383902224682111,
+      9130.264760274384,
+      412.5483724184578,
+      347.080743992425,
+      389.4069191179629,
+      389.4069191179629,
+      9130.264760274384,
+      0.0,
+      0.0
+    ],
+    "bias": 9166.437913306136,
+    "learning_rate": 0.002,
+    "regularization": 0.01,
+    "training_count": 266
+  },
+  "feature_extractor": {
+    "port_window_size": 10,
+    "time_window_size": 300,
+    "feature_cache": {}
+  },
+  "performance_metrics": {
+    "total_predictions": 489,
+    "correct_predictions": 2,
+    "accuracy": 0.015503875968992248,
+    "mean_absolute_error": 26256.903389500952,
+    "root_mean_square_error": 27233.95659824799,
+    "recent_accuracy": 0.015687480834517778,
+    "accuracy_history": [
+      0.015873015873015872,
+      0.015748031496062992,
+      0.015625,
+      0.015503875968992248
+    ]
+  },
+  "config": {
+    "max_training_buffer": 10000,
+    "batch_size": 32,
+    "learning_rate": 0.001,
+    "regularization": 0.01,
+    "feature_dimension": 20,
+    "target_accuracy": 0.5,
+    "min_training_samples": 100,
+    "update_frequency": 10,
+    "evaluation_window": 100
+  }
+}

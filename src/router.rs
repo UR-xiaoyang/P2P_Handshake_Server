@@ -70,7 +70,7 @@ impl RoutingTable { // 路由表
     pub fn remove_routes_via(&mut self, next_hop: &Uuid) {
         let to_remove: Vec<Uuid> = self.routes
             .iter()
-            .filter(|(_, &hop)| hop == *next_hop)
+            .filter(|(_, hop)| **hop == *next_hop)
             .map(|(&dest, _)| dest)
             .collect();
         debug!(
@@ -347,8 +347,10 @@ impl MessageRouter {
         // 这里可以根据消息类型进行不同的处理
         match message.message_type {
             MessageType::Data => {
-                // 处理数据消息
-                debug!("接收到数据消息: {:?}", message.payload);
+                // 处理数据消息 - 这是路由到本地节点的消息，应该在服务器层面处理
+                // 由于这是在路由器中，我们只记录日志，实际的客户端消息传递应该在服务器层处理
+                debug!("接收到路由到本地的数据消息: {:?}", message.payload);
+                info!("消息已到达目标节点（服务器本身），但这可能不是预期行为");
             }
             _ => {
                 debug!("接收到其他类型消息: {:?}", message.message_type);

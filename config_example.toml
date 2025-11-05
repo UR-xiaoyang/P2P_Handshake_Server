@@ -1,0 +1,134 @@
+# P2P握手服务器配置示例
+# 支持增强的ICE方案和流量转发功能
+
+[server]
+# 服务器监听地址
+address = "0.0.0.0:8080"
+
+# 最大连接数
+max_connections = 1000
+
+# 连接超时时间（秒）
+connection_timeout = 30
+
+# 是否启用详细日志
+verbose_logging = false
+
+[stun_server]
+# 是否启用内置STUN服务器（默认禁用）
+# 可通过命令行参数 --STUN 启用
+enable = false
+
+# STUN服务器监听地址
+address = "0.0.0.0:3478"
+
+# STUN服务器超时时间（毫秒）
+timeout_ms = 5000
+
+# 最大并发STUN请求数
+max_concurrent_requests = 100
+
+[nat_detection]
+# 是否启用NAT类型检测
+enable = true
+
+# 用于NAT检测的STUN服务器列表
+stun_servers = [
+    "stun.l.google.com:19302",
+    "stun1.l.google.com:19302",
+    "stun2.l.google.com:19302",
+    "stun.cloudflare.com:3478"
+]
+
+# NAT检测超时时间（毫秒）
+detection_timeout_ms = 10000
+
+# 检测失败时的重试次数
+retry_count = 3
+
+# 是否启用详细的NAT检测日志
+verbose_logging = false
+
+[traffic_forwarding]
+# 是否允许对称NAT客户端的流量转发
+# 可通过命令行参数 --relay 启用
+allow_symmetric_nat_relay = false
+
+# 转发缓冲区大小（字节）
+buffer_size = 65536
+
+# 单个客户端的最大转发速率（字节/秒）
+max_relay_rate_per_client = 1048576  # 1MB/s
+
+# 转发连接的超时时间（秒）
+relay_timeout = 60
+
+# 最大同时转发连接数
+max_concurrent_relays = 50
+
+[port_prediction]
+# 是否启用端口预测功能
+enable = true
+
+# 最大预测端口数量
+max_predictions = 10
+
+# 进行预测所需的最小样本数量
+min_samples = 3
+
+# 预测窗口大小
+prediction_window = 100
+
+# 是否启用IPv6端口预测
+enable_ipv6 = true
+
+# 端口预测范围限制
+port_range_min = 1024
+port_range_max = 65535
+
+# 预测超时时间（毫秒）
+prediction_timeout_ms = 5000
+
+# 是否启用端口验证
+enable_port_verification = true
+
+# 端口验证超时时间（毫秒）
+verification_timeout_ms = 1000
+
+# 是否启用NAT类型特定优化
+enable_nat_type_optimization = true
+
+[security]
+# 是否启用客户端认证
+enable_authentication = true
+
+# 认证超时时间（秒）
+auth_timeout = 10
+
+# 最大未认证连接数
+max_unauthenticated_connections = 100
+
+# 是否启用速率限制
+enable_rate_limiting = true
+
+# 每个IP的最大请求速率（请求/秒）
+max_requests_per_ip = 10
+
+[logging]
+# 日志级别: error, warn, info, debug, trace
+level = "info"
+
+# 日志输出格式: json, pretty
+format = "pretty"
+
+# 是否输出到文件
+log_to_file = false
+
+# 日志文件路径
+log_file_path = "p2p_server.log"
+
+# 日志文件最大大小（MB）
+max_log_file_size = 100
+
+# 保留的日志文件数量
+max_log_files = 5

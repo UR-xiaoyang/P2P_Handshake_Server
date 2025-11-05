@@ -261,10 +261,10 @@ impl PeerManager {
             peers.insert(node_info.id, peer.clone());
         }
         
-        // 发送握手响应：回显客户端的 network_id
+        // 发送握手响应：回显客户端的 network_id，并告知其公网地址
         let mut local_info = self.local_node_info.clone();
         local_info.network_id = incoming_network_id;
-        let response = Message::handshake_response(local_info, true);
+        let response = Message::handshake_response_with_public_addr(local_info, true, peer_addr);
         
         peer.read().await.send_message(&response).await?;
 

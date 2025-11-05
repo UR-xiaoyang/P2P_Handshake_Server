@@ -9,13 +9,22 @@
 - 🔍 **节点发现** - 自动发现和连接网络中的其他节点
 - 📡 **消息路由** - 智能消息转发和路由机制
 - 🔗 **连接池管理** - 高效的连接生命周期管理
-- ⚙️ **配置文件支持** - 灵活的JSON配置
+- ⚙️ **配置文件支持** - 灵活的TOML配置
 - 📊 **完整日志记录** - 详细的运行状态监控
 - 🛡️ **错误处理** - 健壮的错误恢复机制
 
 - 📶 **UDP无连接传输** - 更低延迟，更适合P2P场景
 - ✅ **可靠性增强** - 支持ACK确认与重传、序列号
 - 🧭 **地址驱动的对等管理** - 基于`SocketAddr`的节点索引
+
+### 🆕 ICE增强功能
+
+- 🔍 **NAT类型检测** - 自动识别完全锥形、受限锥形、端口受限锥形和对称NAT
+- 🌐 **内置STUN服务器** - 可选的内置STUN服务，支持NAT穿透
+- 🔄 **流量转发机制** - 为对称NAT客户端提供服务器中继转发
+- 🎯 **智能端口预测** - 基于历史模式和机器学习的端口预测算法
+- 📈 **频率调优** - 动态调整连接尝试频率以提高成功率
+- 🔒 **安全控制** - 可配置的转发权限和速率限制
 
 ## UDP改造概览
 
@@ -56,7 +65,20 @@ cargo run --bin p2p_server
 使用自定义配置：
 
 ```bash
-cargo run --bin p2p_server -- --config config.json --address 127.0.0.1:8080
+cargo run --bin p2p_server -- --config config.toml --address 127.0.0.1:8080
+```
+
+启用ICE增强功能：
+
+```bash
+# 启用内置STUN服务器
+cargo run --bin p2p_server -- --STUN
+
+# 启用流量转发
+cargo run --bin p2p_server -- --relay
+
+# 同时启用STUN和流量转发
+cargo run --bin p2p_server -- --STUN --relay
 ```
 
 ### 运行客户端示例
@@ -552,6 +574,20 @@ RUST_LOG=info ./p2p_server-x86_64-apple-darwin-macos
 设置环境变量来控制日志级别：
 
 ```bash
+export RUST_LOG=info
+cargo run --bin p2p_server
+```
+
+可用的日志级别：`error`, `warn`, `info`, `debug`, `trace`
+
+## 相关文档
+
+- [ICE增强功能详细说明](ICE_ENHANCEMENT.md) - 详细的NAT穿透和流量转发功能文档
+- [配置文件示例](config_example.toml) - 完整的配置文件示例，包含所有可用选项
+
+## 许可证
+
+本项目采用MIT许可证。
 export RUST_LOG=debug
 cargo run --bin p2p_server
 ```

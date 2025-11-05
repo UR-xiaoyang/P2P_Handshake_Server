@@ -167,7 +167,6 @@ impl NetworkManager {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tokio_test;
     
     #[tokio::test]
     async fn test_network_manager_creation() {

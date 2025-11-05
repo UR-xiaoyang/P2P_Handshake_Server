@@ -12,6 +12,8 @@ use crate::network::NetworkManager;
 use crate::peer::{PeerManager, Peer, PeerStatus};
 use crate::protocol::{NodeInfo, Message, MessageType, PeerInfo, HandshakeProtocol};
 use crate::router::{MessageRouter, RoutedMessage};
+use crate::stun_server::StunServer;
+use crate::stun_protocol::is_stun_packet;
 
 pub struct P2PServer {
     config: Config,
@@ -24,6 +26,8 @@ pub struct P2PServer {
     broadcast_task: Arc<Mutex<Option<tokio::task::JoinHandle<()>>>>,
     /// 在去抖窗口内需要排除的节点ID（只排除最后一次加入的节点）
     broadcast_exclude_id: Arc<Mutex<Option<Uuid>>>,
+    /// STUN服务器实例
+    stun_server: Option<Arc<StunServer>>,
 }
 
 impl P2PServer {
@@ -50,6 +54,28 @@ impl P2PServer {
         // 启动路由器的消息缓存清理任务
         let _cache_task = message_router.start_cache_cleanup_task();
         
+        // 初始化STUN服务器（如果启用）
+        let stun_server = if config.stun_server.enable {
+            let stun_bind_addr = std::net::SocketAddr::new(
+                local_addr.ip(),
+                config.stun_server.port
+            );
+            
+            match StunServer::new(config.stun_server.clone(), stun_bind_addr).await {
+                Ok(server) => {
+                    info!("STUN服务器初始化成功，监听端口: {}", config.stun_server.port);
+                    Some(Arc::new(server))
+                }
+                Err(e) => {
+                    warn!("STUN服务器初始化失败: {}，将禁用STUN功能", e);
+                    None
+                }
+            }
+        } else {
+            info!("STUN服务器已禁用");
+            None
+        };
+        
         info!("P2P服务器初始化完成");
         info!("节点ID: {}", local_node_info.id);
         info!("监听地址: {}", local_addr);
@@ -64,6 +90,7 @@ impl P2PServer {
             shutdown_tx: None,
             broadcast_task: Arc::new(Mutex::new(None)),
             broadcast_exclude_id: Arc::new(Mutex::new(None)),
+            stun_server,
         })
     }
 
@@ -120,6 +147,18 @@ impl P2PServer {
         // 启动统计任务
         let stats_task = self.start_stats_task();
         
+        // 启动STUN服务器任务（如果启用）
+        let stun_task = if let Some(ref stun_server) = self.stun_server {
+            let stun_server_clone = stun_server.clone();
+            Some(tokio::spawn(async move {
+                if let Err(e) = stun_server_clone.run().await {
+                    error!("STUN服务器运行失败: {}", e);
+                }
+            }))
+        } else {
+            None
+        };
+        
         // 主循环：接收UDP数据包
         loop {
             select! {
@@ -146,30 +185,170 @@ impl P2PServer {
         }
         
         // 等待所有任务完成
-        let (hb_res, cl_res, st_res) = tokio::join!(heartbeat_task, cleanup_task, stats_task);
-        if let Err(e) = hb_res {
-            warn!("心跳任务结束时发生错误: {}", e);
-        }
-        if let Err(e) = cl_res {
-            warn!("清理任务结束时发生错误: {}", e);
-        }
-        if let Err(e) = st_res {
-            warn!("统计任务结束时发生错误: {}", e);
+        if let Some(stun_task) = stun_task {
+            let (hb_res, cl_res, st_res, stun_res) = tokio::join!(heartbeat_task, cleanup_task, stats_task, stun_task);
+            if let Err(e) = hb_res {
+                warn!("心跳任务结束时发生错误: {}", e);
+            }
+            if let Err(e) = cl_res {
+                warn!("清理任务结束时发生错误: {}", e);
+            }
+            if let Err(e) = st_res {
+                warn!("统计任务结束时发生错误: {}", e);
+            }
+            if let Err(e) = stun_res {
+                warn!("STUN服务器任务结束时发生错误: {}", e);
+            }
+        } else {
+            let (hb_res, cl_res, st_res) = tokio::join!(heartbeat_task, cleanup_task, stats_task);
+            if let Err(e) = hb_res {
+                warn!("心跳任务结束时发生错误: {}", e);
+            }
+            if let Err(e) = cl_res {
+                warn!("清理任务结束时发生错误: {}", e);
+            }
+            if let Err(e) = st_res {
+                warn!("统计任务结束时发生错误: {}", e);
+            }
         }
         
         info!("P2P服务器已停止");
         Ok(())
     }
+
+    async fn handle_relay_request(
+        &self,
+        peer: Arc<tokio::sync::RwLock<Peer>>,
+        message: &Message,
+    ) -> Result<()> {
+        // 检查是否允许为全对称NAT客户端转发流量
+        if !self.config.allow_symmetric_nat_relay {
+            let error_response = Message::relay_response(
+                false,
+                Some("服务器不允许流量转发".to_string()),
+            );
+            peer.read().await.send_message(&error_response).await?;
+            return Ok(());
+        }
+
+        // 解析转发请求
+        let target_peer_id = message
+            .payload
+            .get("target_peer_id")
+            .and_then(|v| v.as_str())
+            .and_then(|s| uuid::Uuid::parse_str(s).ok());
+
+        let data_array = message
+            .payload
+            .get("data")
+            .and_then(|v| v.as_array());
+
+        if let (Some(target_peer_id), Some(data_array)) = (target_peer_id, data_array) {
+            // 将JSON数组转换为字节数组
+            let mut data = Vec::new();
+            for value in data_array {
+                if let Some(num) = value.as_u64() {
+                    if num <= 255 {
+                        data.push(num as u8);
+                    } else {
+                        let error_response = Message::relay_response(
+                            false,
+                            Some("数据格式错误：字节值超出范围".to_string()),
+                        );
+                        peer.read().await.send_message(&error_response).await?;
+                        return Ok(());
+                    }
+                } else {
+                    let error_response = Message::relay_response(
+                        false,
+                        Some("数据格式错误：非数字值".to_string()),
+                    );
+                    peer.read().await.send_message(&error_response).await?;
+                    return Ok(());
+                }
+            }
+
+            // 查找目标peer
+            if let Some(target_peer) = self.peer_manager.get_peer(&target_peer_id).await {
+                if target_peer.read().await.is_authenticated() {
+                    // 创建转发的数据包
+                    let from_peer_id = peer.read().await.id;
+                    let relay_data_message = Message::relay_data(from_peer_id, data.clone());
+                    
+                    // 转发数据到目标peer
+                    match target_peer.read().await.send_message(&relay_data_message).await {
+                        Ok(_) => {
+                            // 发送成功响应
+                            let success_response = Message::relay_response(true, None);
+                            peer.read().await.send_message(&success_response).await?;
+                            info!(
+                                "成功转发数据: {} -> {} ({} bytes)",
+                                from_peer_id,
+                                target_peer_id,
+                                data.len()
+                            );
+                        }
+                        Err(e) => {
+                            // 发送失败响应
+                            let error_response = Message::relay_response(
+                                false,
+                                Some(format!("转发失败: {}", e)),
+                            );
+                            peer.read().await.send_message(&error_response).await?;
+                            warn!("转发数据失败: {}", e);
+                        }
+                    }
+                } else {
+                    let error_response = Message::relay_response(
+                        false,
+                        Some("目标节点未认证".to_string()),
+                    );
+                    peer.read().await.send_message(&error_response).await?;
+                }
+            } else {
+                let error_response = Message::relay_response(
+                    false,
+                    Some("目标节点未找到".to_string()),
+                );
+                peer.read().await.send_message(&error_response).await?;
+            }
+        } else {
+            let error_response = Message::relay_response(
+                false,
+                Some("缺少必要参数".to_string()),
+            );
+            peer.read().await.send_message(&error_response).await?;
+        }
+
+        Ok(())
+    }
     
     async fn handle_udp_packet(&self, data: Vec<u8>, sender_addr: std::net::SocketAddr) -> Result<()> {
+        debug!("处理来自 {} 的UDP数据包: {} bytes", sender_addr, data.len());
+        
+        // 检查是否为STUN消息
+        if is_stun_packet(&data) {
+            debug!("检测到STUN消息，来自: {}", sender_addr);
+            
+            // 如果STUN服务器启用，则由STUN服务器处理
+            if let Some(ref _stun_server) = self.stun_server {
+                // STUN消息由独立的STUN服务器处理，这里不需要额外处理
+                // 因为STUN服务器有自己的UDP套接字
+                debug!("STUN消息将由STUN服务器处理");
+                return Ok(());
+            } else {
+                warn!("收到STUN消息但STUN服务器未启用，来自: {}", sender_addr);
+                return Ok(());
+            }
+        }
+        
+        // 处理P2P消息
         // 打印最原始的UDP数据包内容
         if let Ok(text) = std::str::from_utf8(&data) {
             info!("收到来自 {} 的原始UDP数据包: {}", sender_addr, text);
         } else {
             info!("收到来自 {} 的原始UDP数据包 (非UTF-8): {:?}", sender_addr, data);
         }
-        
-        debug!("处理来自 {} 的UDP数据包: {} bytes", sender_addr, data.len());
         
         // 解析消息
         let mut message = self.network_manager.parse_message(&data)?;
@@ -287,28 +466,53 @@ impl P2PServer {
                             let requester_addr = peer.read().await.addr();
                             let target_addr = target_peer.read().await.addr();
 
+                            // 提取请求方的NAT穿透信息
+                            let requester_nat_type = message.payload.get("nat_type");
+                            let requester_predicted_ports = message.payload.get("predicted_ports");
+                            let requester_public_addr = message.payload.get("public_addr");
+
                             // 通知请求方目标的直连信息
+                            let msg_to_requester_payload = serde_json::json!({
+                                "peer_id": target_id.to_string(),
+                                "peer_addr": target_addr.to_string()
+                            });
+                            
                             let msg_to_requester = Message::new(
                                 MessageType::P2PConnect,
-                                serde_json::json!({
-                                    "peer_id": target_id.to_string(),
-                                    "peer_addr": target_addr.to_string()
-                                }),
+                                msg_to_requester_payload,
                             );
                             peer.read().await.send_message(&msg_to_requester).await?;
 
-                            // 通知目标方请求方的直连信息
+                            // 通知目标方请求方的直连信息，包含NAT穿透信息
+                            let mut msg_to_target_payload = serde_json::json!({
+                                "peer_id": requester_id.to_string(),
+                                "peer_addr": requester_addr.to_string()
+                            });
+
+                            // 转发请求方的NAT穿透信息给目标方
+                            if let Some(nat_type) = requester_nat_type {
+                                msg_to_target_payload["peer_nat_type"] = nat_type.clone();
+                                debug!("转发NAT类型信息: {:?}", nat_type);
+                            }
+                            
+                            if let Some(predicted_ports) = requester_predicted_ports {
+                                msg_to_target_payload["peer_predicted_ports"] = predicted_ports.clone();
+                                debug!("转发预测端口信息: {:?}", predicted_ports);
+                            }
+                            
+                            if let Some(public_addr) = requester_public_addr {
+                                msg_to_target_payload["peer_public_addr"] = public_addr.clone();
+                                debug!("转发公网地址信息: {:?}", public_addr);
+                            }
+
                             let msg_to_target = Message::new(
                                 MessageType::P2PConnect,
-                                serde_json::json!({
-                                    "peer_id": requester_id.to_string(),
-                                    "peer_addr": requester_addr.to_string()
-                                }),
+                                msg_to_target_payload,
                             );
                             target_peer.read().await.send_message(&msg_to_target).await?;
 
                             debug!(
-                                "P2P 直连协调成功: requester={}({}), target={}({})",
+                                "P2P 直连协调成功: requester={}({}), target={}({}), 已转发NAT穿透信息",
                                 requester_id,
                                 requester_addr,
                                 target_id,
@@ -375,6 +579,19 @@ impl P2PServer {
             }
             MessageType::Error => {
                 warn!("收到错误消息: {:?} 来自 {}", message.payload, peer.read().await.addr());
+            }
+            MessageType::RelayRequest => {
+                info!("处理流量转发请求，来自 {}", peer.read().await.addr());
+                self.handle_relay_request(peer, message).await?;
+            }
+            MessageType::RelayResponse => {
+                info!("收到流量转发响应，来自 {}", peer.read().await.addr());
+                // 转发响应通常不需要特殊处理，客户端会直接处理
+            }
+            MessageType::RelayData => {
+                info!("收到转发的数据包，来自 {}", peer.read().await.addr());
+                // 这种消息类型通常由客户端处理，服务器不应该收到
+                warn!("服务器收到了RelayData消息，这可能是配置错误");
             }
             _ => {
                 warn!("未知消息类型: {:?}", message.message_type);

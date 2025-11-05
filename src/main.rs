@@ -9,6 +9,8 @@ mod protocol;
 mod server;
 mod config;
 mod router;
+mod stun_server;
+mod stun_protocol;
 
 use crate::server::P2PServer;
 use crate::config::Config;
@@ -49,6 +51,14 @@ struct Args {
     /// 是否启用节点发现
     #[arg(long)]
     enable_discovery: Option<bool>,
+
+    /// 是否启用内置STUN服务器
+    #[arg(long = "STUN", action = ArgAction::SetTrue)]
+    enable_stun: bool,
+
+    /// 启用流量转发功能
+    #[arg(long = "relay", action = ArgAction::SetTrue)]
+    enable_relay: bool,
 
     /// 设置日志级别为 TRACE
     #[arg(long = "TRACE", action = ArgAction::SetTrue)]
@@ -122,6 +132,16 @@ async fn main() -> anyhow::Result<()> {
     }
     if let Some(enable_discovery) = args.enable_discovery {
         config.enable_discovery = enable_discovery;
+    }
+
+    // 处理STUN服务器启用参数
+    if args.enable_stun {
+        config.stun_server.enable = true;
+    }
+
+    // 处理流量转发参数
+    if args.enable_relay {
+        config.allow_symmetric_nat_relay = true;
     }
 
     info!("最终配置: {:?}", config);

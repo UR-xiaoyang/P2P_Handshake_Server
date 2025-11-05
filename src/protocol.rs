@@ -33,6 +33,12 @@ pub enum MessageType {
     Retransmit,
     /// P2P 直连指令（NAT 打洞）
     P2PConnect,
+    /// 流量转发请求（用于全对称NAT）
+    RelayRequest,
+    /// 流量转发响应
+    RelayResponse,
+    /// 转发的数据包
+    RelayData,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -108,11 +114,25 @@ impl Message {
         Self::new(MessageType::HandshakeRequest, payload)
     }
     
+    #[allow(dead_code)]
     pub fn handshake_response(node_info: NodeInfo, success: bool) -> Self {
         let response = HandshakeResponse {
             node_info,
             success,
             error_message: None,
+            public_addr: None,
+        };
+        let payload = serde_json::to_value(response).unwrap();
+        Self::new(MessageType::HandshakeResponse, payload)
+    }
+
+    /// 创建包含公网地址的握手响应
+    pub fn handshake_response_with_public_addr(node_info: NodeInfo, success: bool, public_addr: SocketAddr) -> Self {
+        let response = HandshakeResponse {
+            node_info,
+            success,
+            error_message: None,
+            public_addr: Some(public_addr),
         };
         let payload = serde_json::to_value(response).unwrap();
         Self::new(MessageType::HandshakeResponse, payload)
@@ -162,9 +182,65 @@ impl Message {
     }
 
     /// 发起 P2P 直连请求（由服务器协调打洞）
+    #[allow(dead_code)]
     pub fn initiate_p2p(peer_id: Uuid) -> Self {
         let payload = serde_json::json!({ "peer_id": peer_id.to_string() });
         Self::new(MessageType::P2PConnect, payload)
+    }
+
+    /// 发起 P2P 直连请求，包含端口预测信息
+    #[allow(dead_code)]
+    pub fn initiate_p2p_with_prediction(
+        peer_id: Uuid, 
+        nat_type: Option<String>,
+        predicted_ports: Option<Vec<u16>>,
+        public_addr: Option<SocketAddr>
+    ) -> Self {
+        let mut payload = serde_json::json!({ "peer_id": peer_id.to_string() });
+        
+        if let Some(nat_type) = nat_type {
+            payload["nat_type"] = serde_json::to_value(nat_type).unwrap_or(serde_json::Value::Null);
+        }
+        
+        if let Some(ports) = predicted_ports {
+            payload["predicted_ports"] = serde_json::to_value(ports).unwrap_or(serde_json::Value::Null);
+        }
+        
+        if let Some(addr) = public_addr {
+            payload["public_addr"] = serde_json::Value::String(addr.to_string());
+        }
+        
+        Self::new(MessageType::P2PConnect, payload)
+    }
+
+    /// 创建流量转发请求
+    #[allow(dead_code)]
+    pub fn relay_request(target_peer_id: Uuid, data: Vec<u8>) -> Self {
+        let mut payload = serde_json::Map::new();
+        payload.insert("target_peer_id".to_string(), serde_json::Value::String(target_peer_id.to_string()));
+        payload.insert("data".to_string(), serde_json::Value::Array(data.into_iter().map(|b| serde_json::Value::Number(serde_json::Number::from(b))).collect()));
+        
+        Self::new(MessageType::RelayRequest, serde_json::Value::Object(payload))
+    }
+
+    /// 创建流量转发响应
+    pub fn relay_response(success: bool, error_message: Option<String>) -> Self {
+        let mut payload = serde_json::Map::new();
+        payload.insert("success".to_string(), serde_json::Value::Bool(success));
+        if let Some(error) = error_message {
+            payload.insert("error_message".to_string(), serde_json::Value::String(error));
+        }
+        
+        Self::new(MessageType::RelayResponse, serde_json::Value::Object(payload))
+    }
+
+    /// 创建转发的数据包
+    pub fn relay_data(from_peer_id: Uuid, data: Vec<u8>) -> Self {
+        let mut payload = serde_json::Map::new();
+        payload.insert("from_peer_id".to_string(), serde_json::Value::String(from_peer_id.to_string()));
+        payload.insert("data".to_string(), serde_json::Value::Array(data.into_iter().map(|b| serde_json::Value::Number(serde_json::Number::from(b))).collect()));
+        
+        Self::new(MessageType::RelayData, serde_json::Value::Object(payload))
     }
 }
 
@@ -214,6 +290,8 @@ pub struct HandshakeResponse {
     pub node_info: NodeInfo,
     pub success: bool,
     pub error_message: Option<String>,
+    /// 客户端的公网地址（服务器看到的地址）
+    pub public_addr: Option<SocketAddr>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -249,6 +327,27 @@ impl PeerInfo {
             .unwrap()
             .as_secs();
     }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[allow(dead_code)]
+pub struct RelayRequest {
+    pub target_peer_id: Uuid,
+    pub data: Vec<u8>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[allow(dead_code)]
+pub struct RelayResponse {
+    pub success: bool,
+    pub error_message: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[allow(dead_code)]
+pub struct RelayData {
+    pub from_peer_id: Uuid,
+    pub data: Vec<u8>,
 }
 
 /// 握手协议处理器
